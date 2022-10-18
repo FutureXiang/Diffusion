@@ -1,6 +1,12 @@
 # Minimal Classifier-free-DDIM
 Minimal implementation of Denoising Diffusion Probabilistic Models (DDPM) with Classifier-free Guidance and DDIM fast sampling.
 
+## Additional Dependencies
+```
+pip install pytorch-fid
+pip install ema-pytorch
+```
+
 ## Scripts
 
 ### Training
