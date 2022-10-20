@@ -52,7 +52,7 @@ def sample(opt):
     w = opt.w
 
     with open(yaml_path, 'r') as f:
-        opt = yaml.load(f)
+        opt = yaml.full_load(f)
     print(opt)
     opt = Config(opt)
     ep = opt.n_epoch - 1

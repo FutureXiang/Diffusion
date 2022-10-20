@@ -77,7 +77,7 @@ def train(opt):
     local_rank = opt.local_rank
 
     with open(yaml_path, 'r') as f:
-        opt = yaml.load(f)
+        opt = yaml.full_load(f)
     print(opt)
     opt = Config(opt)
     model_dir = os.path.join(opt.save_dir, "ckpts")
@@ -132,7 +132,8 @@ def train(opt):
         print("loading model at", target)
         checkpoint = torch.load(target, map_location=device)
         ddpm.load_state_dict(checkpoint['DDPM'])
-        ema.load_state_dict(checkpoint['EMA'])
+        if local_rank == 0:
+            ema.load_state_dict(checkpoint['EMA'])
         optim.load_state_dict(checkpoint['opt'])
         sched.load_state_dict(checkpoint['sched'])
 
