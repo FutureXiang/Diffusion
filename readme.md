@@ -37,8 +37,13 @@ Sample 50000 images by adapted `sample.py` and `DDPM.py`, with official checkpoi
 - Unconditional
   - DDPM, with EMA, FID = 3.31
   - DDIM, with EMA, FID = 4.33
-- Contidional
-  - [TODO]
+  - DDPM, no EMA, FID = 4.49
+  - DDIM, no EMA, FID = 5.22
+- Conditional (Classifier-free guidance, $w=0.3$)
+  - DDPM, with EMA, FID = 3.08
+  - DDIM, with EMA, FID = 3.42
+  - DDPM, no EMA, FID = 3.25
+  - DDIM, no EMA, FID = 3.20
 
 ### Some observations
 - BigGAN up/downsampling (proposed by [DDPM++](https://openreview.net/pdf?id=PxTIG12RRHS) and [Beat GANs](https://papers.nips.cc/paper/2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf)) doesn't seem to work on conditional model.
