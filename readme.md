@@ -34,16 +34,14 @@ Sample 50000 images by adapted `sample.py` and `DDPM.py`, with official checkpoi
 - DDIM, with EMA, FID = 4.10
     - The $\bar\alpha_t$ schedule proposed by [DDIM](https://arxiv.org/pdf/2010.02502.pdf) (i.e. $\bar\alpha_0 := 1$, implemented by `torch.cat([torch.tensor([0.0]), torch.linspace(beta1, beta2, T)])`) performs worse on FID than the bugged/unofficial one (implemented by `beta_t = torch.linspace(beta1, beta2, T + 1)`) ?
 ### Training from scratch
-- Unconditional
-  - DDPM, with EMA, FID = 3.31
-  - DDIM, with EMA, FID = 4.33
-  - DDPM, no EMA, FID = 4.49
-  - DDIM, no EMA, FID = 5.22
-- Conditional (Classifier-free guidance, $w=0.3$)
-  - DDPM, with EMA, FID = 3.08
-  - DDIM, with EMA, FID = 3.42
-  - DDPM, no EMA, FID = 3.25
-  - DDIM, no EMA, FID = 3.20
+| model                    | EMA | DDPM | DDIM(100 steps) |
+|--------------------------|-----|------|-----------------|
+| (reported in papers)     | yes | 3.17 | 4.16            |
+| (official checkpoint)    | yes | 3.13 | 4.10            |
+| unconditional            | yes | 3.31 | 4.33            |
+| unconditional            | no  | 4.49 | 5.22            |
+| conditional (CFG, w=0.3) | yes | 3.08 | 3.42            |
+| conditional (CFG, w=0.3) | no  | 3.25 | 3.20            |
 
 ### Some observations
 - BigGAN up/downsampling (proposed by [DDPM++](https://openreview.net/pdf?id=PxTIG12RRHS) and [Beat GANs](https://papers.nips.cc/paper/2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf)) doesn't seem to work on conditional model.

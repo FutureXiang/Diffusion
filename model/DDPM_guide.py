@@ -106,6 +106,12 @@ class DDPM(nn.Module):
         return x_i
 
     def ddim_sample(self, n_sample, size, steps=250, eta=1.0, notqdm=False, guide_w=0.0, n_classes=10):
+        def pred_x0_(x_t, eps, ab_t, clip=False):
+            x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
+            if clip:
+                x_start = torch.clip(x_start, min=-1.0, max=1.0)
+            return x_start
+
         sche = self.ddim_sche
         c, mask = self.prepare_condition_(n_sample, n_classes)
         x_i = torch.randn(n_sample, *size).to(self.device)
@@ -130,7 +136,7 @@ class DDPM(nn.Module):
 
             # DDIM sampling, `steps` steps
             alpha = sche["alphabar_t"][time]
-            x0_t = self.pred_x0_(x_i, eps, alpha)
+            x0_t = pred_x0_(x_i, eps, alpha)
             alpha_next = sche["alphabar_t"][time_next]
             c1 = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c2 = (1 - alpha_next - c1 ** 2).sqrt()
@@ -139,11 +145,6 @@ class DDPM(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
-    def pred_x0_(self, x_t, eps, ab_t, clip=False):
-        x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
-        if clip:
-            x_start = torch.clip(x_start, min=-1.0, max=1.0)
-        return x_start
 
     def pred_eps_(self, x_t, t, c, mask, guide_w):
         eps = self.nn_model(x_t, t, c, mask)
