@@ -71,16 +71,8 @@ def train(opt):
         os.makedirs(vis_dir, exist_ok=True)
 
     device = "cuda:%d" % local_rank
-    ddpm = DDPM(nn_model=UNet(image_channels=opt.in_channels,
-                              n_channels=opt.n_channels,
-                              ch_mults=opt.ch_mults,
-                              is_attn=opt.is_attn,
-                              dropout=opt.dropout,
-                              n_blocks=opt.n_blocks,
-                              use_res_for_updown=opt.biggan,
-                              ),
-                betas=opt.betas,
-                n_T=opt.n_T,
+    ddpm = DDPM(nn_model=UNet(**opt.unet),
+                **opt.ddpm,
                 device=device,
                 )
     ddpm.to(device)

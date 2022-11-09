@@ -118,7 +118,7 @@ class DownsampleRes(nn.Module):
  
 
 class UNet(nn.Module):
-    def __init__(self, image_channels = 3, n_channels = 128,
+    def __init__(self, image_shape = [3, 32, 32], n_channels = 128,
                  ch_mults = (1, 2, 2, 2),
                  is_attn = (False, True, False, False),
                  dropout = 0.1,
@@ -126,7 +126,7 @@ class UNet(nn.Module):
                  use_res_for_updown = False,
                  n_classes = 10):
         """
-        * `image_channels` is the number of channels in the image. $3$ for RGB.
+        * `image_shape` is the (channel, height, width) size of images.
         * `n_channels` is number of channels in the initial feature map that we transform the image into
         * `ch_mults` is the list of channel numbers at each resolution. The number of channels is `n_channels * ch_mults[i]`
         * `is_attn` is a list of booleans that indicate whether to use attention at each resolution
@@ -139,7 +139,7 @@ class UNet(nn.Module):
 
         n_resolutions = len(ch_mults)
 
-        self.image_proj = nn.Conv2d(image_channels, n_channels, kernel_size=3, padding=1)
+        self.image_proj = nn.Conv2d(image_shape[0], n_channels, kernel_size=3, padding=1)
 
         # Time embedding layer.
         time_channels = n_channels * 4
@@ -196,7 +196,7 @@ class UNet(nn.Module):
         # Final normalization and convolution layer
         self.norm = nn.GroupNorm(8, out_channels)
         self.act = nn.SiLU()
-        self.final = nn.Conv2d(out_channels, image_channels, kernel_size=3, padding=1)
+        self.final = nn.Conv2d(out_channels, image_shape[0], kernel_size=3, padding=1)
 
     def forward(self, x, t, c, drop_mask):
         """

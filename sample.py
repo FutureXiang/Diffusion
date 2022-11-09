@@ -59,16 +59,8 @@ def sample(opt):
         ep = opt.n_epoch - 1
 
     device = "cuda:%d" % local_rank
-    ddpm = DDPM(nn_model=UNet(image_channels=opt.in_channels,
-                              n_channels=opt.n_channels,
-                              ch_mults=opt.ch_mults,
-                              is_attn=opt.is_attn,
-                              dropout=opt.dropout,
-                              n_blocks=opt.n_blocks,
-                              use_res_for_updown=opt.biggan,
-                              ),
-                betas=opt.betas,
-                n_T=opt.n_T,
+    ddpm = DDPM(nn_model=UNet(**opt.unet),
+                **opt.ddpm,
                 device=device,
                 )
     ddpm.to(device)
@@ -108,9 +100,9 @@ def sample(opt):
             assert 400 % dist.get_world_size() == 0
             samples_per_process = 400 // dist.get_world_size()
             if mode == 'DDPM':
-                x_gen = model.sample(samples_per_process, (opt.in_channels, opt.shape, opt.shape), notqdm=(local_rank != 0))
+                x_gen = model.sample(samples_per_process, opt.unet['image_shape'], notqdm=(local_rank != 0))
             else:
-                x_gen = model.ddim_sample(samples_per_process, (opt.in_channels, opt.shape, opt.shape), steps=steps, eta=eta, notqdm=(local_rank != 0))
+                x_gen = model.ddim_sample(samples_per_process, opt.unet['image_shape'], steps=steps, eta=eta, notqdm=(local_rank != 0))
         dist.barrier()
         x_gen = gather_tensor(x_gen)
         if local_rank == 0:

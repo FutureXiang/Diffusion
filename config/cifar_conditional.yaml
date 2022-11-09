@@ -1,15 +1,16 @@
 # model params
-n_T: 1000
-betas: [1.0e-4, 0.02]
-in_channels: 3
-n_channels: 128
-ch_mults: [1, 2, 2, 2]
-is_attn: [False, True, False, False]
-dropout: 0.1
-n_blocks: 2
-biggan: False
-n_classes : 10
-shape: 32
+ddpm:
+  n_T: 1000
+  betas: [1.0e-4, 0.02]
+unet:
+  image_shape: [3, 32, 32]
+  n_channels: 128
+  ch_mults: [1, 2, 2, 2]
+  is_attn: [False, True, False, False]
+  dropout: 0.1
+  n_blocks: 2
+  use_res_for_updown: False
+  n_classes : 10
 
 # training params
 n_epoch: 2000
