@@ -38,10 +38,11 @@ Sample 50000 images by adapted `sample.py` and `DDPM.py`, with official checkpoi
 |--------------------------|-----|------|-----------------|
 | (reported in papers)     | yes | 3.17 | 4.16            |
 | (official checkpoint)    | yes | 3.13 | 4.10            |
-| unconditional            | yes | 3.31 | 4.33            |
-| unconditional            | no  | 4.49 | 5.22            |
+| unconditional$^*$        | yes | 3.33 | 4.08            |
+| unconditional$^*$        | no  | 4.44 | 5.41            |
 | conditional (CFG, w=0.3) | yes | 3.08 | 3.42            |
 | conditional (CFG, w=0.3) | no  | 3.25 | 3.20            |
+$^*$ Overfitting may be a problem on CIFAR-10. Best FID model (DDIM@100) is found at epoch 1700 instead of 2000.
 
 ### Some observations
 - BigGAN up/downsampling (proposed by [DDPM++](https://openreview.net/pdf?id=PxTIG12RRHS) and [Beat GANs](https://papers.nips.cc/paper/2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf)) doesn't seem to work on conditional model.

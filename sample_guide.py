@@ -49,13 +49,15 @@ def sample(opt):
     eta = opt.eta
     batches = opt.batches
     use_ema = opt.ema
+    ep = opt.epoch
     w = opt.w
 
     with open(yaml_path, 'r') as f:
         opt = yaml.full_load(f)
     print(opt)
     opt = Config(opt)
-    ep = opt.n_epoch - 1
+    if ep == -1:
+        ep = opt.n_epoch - 1
 
     device = "cuda:%d" % local_rank
     ddpm = DDPM(nn_model=UNet(image_channels=opt.in_channels,
@@ -135,6 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("--eta", type=float, default=0.0)
     parser.add_argument("--batches", type=int, default=125)
     parser.add_argument("--ema", action='store_true', default=False)
+    parser.add_argument("--epoch", type=int, default=-1)
     parser.add_argument("--w", type=float, default=0.3)
     opt = parser.parse_args()
 
