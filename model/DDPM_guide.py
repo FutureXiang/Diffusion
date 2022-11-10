@@ -48,9 +48,9 @@ def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
 
 
-class DDPM(nn.Module):
+class DDPM_guide(nn.Module):
     def __init__(self, nn_model, betas, n_T, device, drop_prob=0.1):
-        super(DDPM, self).__init__()
+        super(DDPM_guide, self).__init__()
         self.nn_model = nn_model.to(device)
         params = sum(p.numel() for p in nn_model.parameters() if p.requires_grad) / 1e6
         print(f"nn model # params: {params:.1f}")
@@ -79,7 +79,7 @@ class DDPM(nn.Module):
         return self.loss(noise, self.nn_model(x_t, _ts / self.n_T, c, mask))
 
 
-    def sample(self, n_sample, size, notqdm=False, guide_w=0.0, n_classes=10):
+    def sample(self, n_sample, size, notqdm=False, guide_w=0.3, n_classes=10):
         sche = self.ddpm_sche
         c, mask = self.prepare_condition_(n_sample, n_classes)
         x_i = torch.randn(n_sample, *size).to(self.device)
@@ -105,7 +105,7 @@ class DDPM(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
-    def ddim_sample(self, n_sample, size, steps=250, eta=1.0, notqdm=False, guide_w=0.0, n_classes=10):
+    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, guide_w=0.3, n_classes=10):
         def pred_x0_(x_t, eps, ab_t, clip=False):
             x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
             if clip:

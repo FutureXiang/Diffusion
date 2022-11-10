@@ -1,9 +1,13 @@
 # model params
-model_type: 'DDPM'
+model_type: 'EDM'
 net_type: 'UNet'
 diffusion:
-  n_T: 1000
-  betas: [1.0e-4, 0.02]
+  sigma_data: 0.5
+  p_mean: -1.2
+  p_std: 1.2
+  sigma_min: 0.002
+  sigma_max: 80
+  rho: 7
 network:
   image_shape: [3, 32, 32]
   n_channels: 128
@@ -22,5 +26,5 @@ flip: True
 
 # testing params
 n_sample: 30
-save_dir: './2000_unconditional'
+save_dir: './2000_unconditional_EDM'
 save_model: True

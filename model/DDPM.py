@@ -96,7 +96,7 @@ class DDPM(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
-    def ddim_sample(self, n_sample, size, steps=250, eta=1.0, notqdm=False):
+    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False):
         def pred_x0_(x_t, eps, ab_t, clip=False):
             x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
             if clip:

@@ -117,7 +117,7 @@ class DownsampleRes(nn.Module):
         return self.op(x, t, c)
  
 
-class UNet(nn.Module):
+class UNet_guide(nn.Module):
     def __init__(self, image_shape = [3, 32, 32], n_channels = 128,
                  ch_mults = (1, 2, 2, 2),
                  is_attn = (False, True, False, False),
@@ -239,9 +239,9 @@ class UNet(nn.Module):
 
 
 '''
-from model.unet_guide import UNet
-net1 = UNet(use_res_for_updown=False)
-net2 = UNet(use_res_for_updown=True)
+from model.unet_guide import UNet_guide
+net1 = UNet_guide(use_res_for_updown=False)
+net2 = UNet_guide(use_res_for_updown=True)
 import torch
 x = torch.zeros(1, 3, 32, 32)
 t = torch.zeros(1,)

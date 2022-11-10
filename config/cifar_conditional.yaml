@@ -1,8 +1,10 @@
 # model params
-ddpm:
+model_type: 'DDPM'
+net_type: 'UNet'
+diffusion:
   n_T: 1000
   betas: [1.0e-4, 0.02]
-unet:
+network:
   image_shape: [3, 32, 32]
   n_channels: 128
   ch_mults: [1, 2, 2, 2]

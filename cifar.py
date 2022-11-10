@@ -14,8 +14,7 @@ from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 from ema_pytorch import EMA
 
-from model.DDPM import DDPM
-from model.unet import UNet
+from model.models import get_models_class
 
 # ===== Config yaml files (helper functions)
 
@@ -71,18 +70,19 @@ def train(opt):
         os.makedirs(vis_dir, exist_ok=True)
 
     device = "cuda:%d" % local_rank
-    ddpm = DDPM(nn_model=UNet(**opt.unet),
-                **opt.ddpm,
-                device=device,
-                )
-    ddpm.to(device)
+    DIFFUSION, NETWORK = get_models_class(opt.model_type, opt.net_type, guide=False)
+    diff = DIFFUSION(nn_model=NETWORK(**opt.network),
+                     **opt.diffusion,
+                     device=device,
+                     )
+    diff.to(device)
     if local_rank == 0:
-        ema = EMA(ddpm, beta=0.9999, update_after_step=1000, update_every=10)
+        ema = EMA(diff, beta=0.9999, update_after_step=1000, update_every=10)
         ema.to(device)
 
-    ddpm = torch.nn.SyncBatchNorm.convert_sync_batchnorm(ddpm)
-    ddpm = torch.nn.parallel.DistributedDataParallel(
-        ddpm, device_ids=[local_rank], output_device=local_rank)
+    diff = torch.nn.SyncBatchNorm.convert_sync_batchnorm(diff)
+    diff = torch.nn.parallel.DistributedDataParallel(
+        diff, device_ids=[local_rank], output_device=local_rank)
 
     tf = [transforms.ToTensor()]
     if opt.flip:
@@ -99,7 +99,7 @@ def train(opt):
     DDP_multiplier = dist.get_world_size()
     print("Using DDP, lr = %f * %d" % (lr, DDP_multiplier))
     lr *= DDP_multiplier
-    optim = torch.optim.Adam(ddpm.parameters(), lr=lr)
+    optim = torch.optim.Adam(diff.parameters(), lr=lr)
     sched = CosineAnnealingLR(optim, opt.n_epoch)
 
 
@@ -107,7 +107,7 @@ def train(opt):
         target = os.path.join(model_dir, f"model_{opt.load_epoch}.pth")
         print("loading model at", target)
         checkpoint = torch.load(target, map_location=device)
-        ddpm.load_state_dict(checkpoint['DDPM'])
+        diff.load_state_dict(checkpoint['MODEL'])
         if local_rank == 0:
             ema.load_state_dict(checkpoint['EMA'])
         optim.load_state_dict(checkpoint['opt'])
@@ -117,7 +117,7 @@ def train(opt):
         sampler.set_epoch(ep)
         dist.barrier()
         # training
-        ddpm.train()
+        diff.train()
         if local_rank == 0:
             now_lr = optim.param_groups[0]['lr']
             print(f'epoch {ep}, lr {now_lr:f}')
@@ -128,9 +128,9 @@ def train(opt):
         for x, c in pbar:
             optim.zero_grad()
             x = x.to(device)
-            loss = ddpm(x)
+            loss = diff(x)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(parameters=ddpm.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(parameters=diff.parameters(), max_norm=1.0)
             optim.step()
 
             # logging
@@ -154,9 +154,15 @@ def train(opt):
             else:
                 continue
 
-            ddpm.eval()
+            if opt.model_type == 'DDPM':
+                raw_sample_method = diff.module.ddim_sample
+                ema_sample_method = ema.ema_model.ddim_sample
+            elif opt.model_type == 'EDM':
+                raw_sample_method = diff.module.edm_sample
+                ema_sample_method = ema.ema_model.edm_sample
+            diff.eval()
             with torch.no_grad():
-                x_gen = ddpm.module.ddim_sample(opt.n_sample, x.shape[1:], steps=100, eta=0.0)
+                x_gen = raw_sample_method(opt.n_sample, x.shape[1:])
             # save an image of currently generated samples (top rows)
             # followed by real images (bottom rows)
             x_real = x[:opt.n_sample]
@@ -169,7 +175,7 @@ def train(opt):
 
             ema.ema_model.eval()
             with torch.no_grad():
-                x_gen = ema.ema_model.ddim_sample(opt.n_sample, x.shape[1:], steps=100, eta=0.0)
+                x_gen = ema_sample_method(opt.n_sample, x.shape[1:])
             # save an image of currently generated samples (top rows)
             # followed by real images (bottom rows)
             x_real = x[:opt.n_sample]
@@ -183,7 +189,7 @@ def train(opt):
             # optionally save model
             if opt.save_model:
                 checkpoint = {
-                    'DDPM': ddpm.state_dict(),
+                    'MODEL': diff.state_dict(),
                     'EMA': ema.state_dict(),
                     'opt': optim.state_dict(),
                     'sched': sched.state_dict(),

@@ -9,8 +9,7 @@ import yaml
 from torchvision.utils import make_grid, save_image
 from ema_pytorch import EMA
 
-from model.DDPM_guide import DDPM
-from model.unet_guide import UNet
+from model.models import get_models_class
 
 # ===== Config yaml files (helper functions)
 
@@ -18,6 +17,13 @@ class Config(object):
     def __init__(self, dic):
         for key in dic:
             setattr(self, key, dic[key])
+
+
+def get_default_steps(model_type, steps):
+    if steps is not None:
+        return steps
+    else:
+        return {'DDPM': 100, 'EDM': 18}[model_type]
 
 # ===== Multi-GPU training (helper functions)
 
@@ -60,37 +66,40 @@ def sample(opt):
         ep = opt.n_epoch - 1
 
     device = "cuda:%d" % local_rank
-    ddpm = DDPM(nn_model=UNet(**opt.unet),
-                **opt.ddpm,
-                device=device,
-                drop_prob=0.1)
-    ddpm.to(device)
+    steps = get_default_steps(opt.model_type, steps)
+    DIFFUSION, NETWORK = get_models_class(opt.model_type, opt.net_type, guide=True)
+    diff = DIFFUSION(nn_model=NETWORK(**opt.network),
+                     **opt.diffusion,
+                     device=device,
+                     drop_prob=0.1)
+    diff.to(device)
 
     target = os.path.join(opt.save_dir, "ckpts", f"model_{ep}.pth")
     print("loading model at", target)
     checkpoint = torch.load(target, map_location=device)
     if use_ema:
-        ema = EMA(ddpm, beta=0.9999, update_after_step=1000, update_every=10)
+        ema = EMA(diff, beta=0.9999, update_after_step=1000, update_every=10)
         ema.to(device)
         ema.load_state_dict(checkpoint['EMA'])
         model = ema.ema_model
         prefix = "EMA"
     else:
-        ddpm = torch.nn.SyncBatchNorm.convert_sync_batchnorm(ddpm)
-        ddpm = torch.nn.parallel.DistributedDataParallel(
-            ddpm, device_ids=[local_rank], output_device=local_rank)
-        ddpm.load_state_dict(checkpoint['DDPM'])
-        model = ddpm.module
+        diff = torch.nn.SyncBatchNorm.convert_sync_batchnorm(diff)
+        diff = torch.nn.parallel.DistributedDataParallel(
+            diff, device_ids=[local_rank], output_device=local_rank)
+        diff.load_state_dict(checkpoint['MODEL'])
+        model = diff.module
         prefix = ""
     model.eval()
 
     if local_rank == 0:
-        if mode == 'DDPM':
-            gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_ddpm")
-        elif mode == 'DDIM':
-            gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_ddim_steps{steps}_eta{eta}")
+        if opt.model_type == 'EDM':
+            gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_edm_steps{steps}_Schurn{eta}")
         else:
-            raise NotImplementedError()
+            if mode == 'DDPM':
+                gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_ddpm")
+            else:
+                gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_ddim_steps{steps}_eta{eta}")
         os.makedirs(gen_dir)
         gen_dir_png = os.path.join(gen_dir, "pngs")
         os.makedirs(gen_dir_png)
@@ -100,10 +109,14 @@ def sample(opt):
         with torch.no_grad():
             assert 400 % dist.get_world_size() == 0
             samples_per_process = 400 // dist.get_world_size()
-            if mode == 'DDPM':
-                x_gen = model.sample(samples_per_process, opt.unet['image_shape'], guide_w=w, notqdm=(local_rank != 0))
+            args = dict(n_sample=samples_per_process, size=opt.network['image_shape'], guide_w=w, notqdm=(local_rank != 0))
+            if opt.model_type == 'EDM':
+                x_gen = model.edm_sample(**args, num_steps=steps, S_churn=eta)
             else:
-                x_gen = model.ddim_sample(samples_per_process, opt.unet['image_shape'], guide_w=w, steps=steps, eta=eta, notqdm=(local_rank != 0))
+                if mode == 'DDPM':
+                    x_gen = model.sample(**args)
+                else:
+                    x_gen = model.ddim_sample(**args, steps=steps, eta=eta)
         dist.barrier()
         x_gen = gather_tensor(x_gen)
         if local_rank == 0:
@@ -125,7 +138,7 @@ if __name__ == "__main__":
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
     parser.add_argument("--mode", type=str, choices=['DDPM', 'DDIM'], default='DDIM')
-    parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--eta", type=float, default=0.0)
     parser.add_argument("--batches", type=int, default=125)
     parser.add_argument("--ema", action='store_true', default=False)
