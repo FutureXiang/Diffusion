@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import yaml
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import CIFAR10
@@ -21,15 +20,15 @@ from model.models import get_models_class
 def get_real_samples_grid(x, c, size, opt):
     # append some real images at bottom, order by class also
     x_real = torch.Tensor(size)
-    for k in range(opt.n_classes):
+    for k in range(opt.network['n_classes']):
         sample_label_k = torch.squeeze((c == k).nonzero())
-        n_sample_per_class = opt.n_sample // opt.n_classes
+        n_sample_per_class = opt.n_sample // opt.network['n_classes']
         for j in range(n_sample_per_class):
             try:
                 idx = sample_label_k[j]
             except:
                 idx = 0
-            x_real[k + (j * opt.n_classes)] = x[idx]
+            x_real[k + (j * opt.network['n_classes'])] = x[idx]
     return x_real
 
 # ===== Config yaml files (helper functions)
@@ -93,7 +92,7 @@ def train(opt):
                      drop_prob=0.1)
     diff.to(device)
     if local_rank == 0:
-        ema = EMA(diff, beta=0.9999, update_after_step=1000, update_every=10)
+        ema = EMA(diff, beta=opt.ema, update_after_step=0, update_every=1)
         ema.to(device)
 
     diff = torch.nn.SyncBatchNorm.convert_sync_batchnorm(diff)
@@ -116,7 +115,6 @@ def train(opt):
     print("Using DDP, lr = %f * %d" % (lr, DDP_multiplier))
     lr *= DDP_multiplier
     optim = torch.optim.Adam(diff.parameters(), lr=lr)
-    sched = CosineAnnealingLR(optim, opt.n_epoch)
 
 
     if opt.load_epoch != -1:
@@ -127,9 +125,10 @@ def train(opt):
         if local_rank == 0:
             ema.load_state_dict(checkpoint['EMA'])
         optim.load_state_dict(checkpoint['opt'])
-        sched.load_state_dict(checkpoint['sched'])
 
     for ep in range(opt.load_epoch + 1, opt.n_epoch):
+        for g in optim.param_groups:
+            g['lr'] = lr * min((ep + 1.0) / opt.warm_epoch, 1.0) # warmup
         sampler.set_epoch(ep)
         dist.barrier()
         # training
@@ -160,9 +159,6 @@ def train(opt):
                 else:
                     loss_ema = 0.95 * loss_ema + 0.05 * loss.item()
                 pbar.set_description(f"loss: {loss_ema:.4f}")
-
-        # cosine scheduler
-        sched.step()
 
         # testing
         if local_rank == 0:
@@ -209,7 +205,6 @@ def train(opt):
                     'MODEL': diff.state_dict(),
                     'EMA': ema.state_dict(),
                     'opt': optim.state_dict(),
-                    'sched': sched.state_dict(),
                 }
                 save_path = os.path.join(model_dir, f"model_{ep}.pth")
                 torch.save(checkpoint, save_path)

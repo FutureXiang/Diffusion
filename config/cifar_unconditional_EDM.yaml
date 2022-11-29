@@ -8,21 +8,26 @@ diffusion:
   sigma_min: 0.002
   sigma_max: 80
   rho: 7
+  S_min: 0.01
+  S_max: 1
+  S_noise: 1.007
 network:
   image_shape: [3, 32, 32]
   n_channels: 128
   ch_mults: [1, 2, 2, 2]
   is_attn: [False, True, False, False]
-  dropout: 0.1
+  dropout: 0.13
   n_blocks: 2
   use_res_for_updown: False
 
 # training params
 n_epoch: 2000
 batch_size: 128
-lrate: 2.0e-4
+lrate: 1.0e-4
+warm_epoch: 200
 load_epoch: -1
 flip: True
+ema: 0.9993
 
 # testing params
 n_sample: 30

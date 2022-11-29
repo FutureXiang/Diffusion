@@ -18,7 +18,9 @@ def unnormalize_to_zero_to_one(t):
 
 class EDM(nn.Module):
     def __init__(self, nn_model,
-                 sigma_data, p_mean, p_std, sigma_min, sigma_max, rho,
+                 sigma_data, p_mean, p_std,
+                 sigma_min, sigma_max, rho,
+                 S_min, S_max, S_noise,
                  device):
         '''
             EDM proposed by "Elucidating the Design Space of Diffusion-Based Generative Models".
@@ -29,6 +31,7 @@ class EDM(nn.Module):
                 `sigma_data`, `p_mean`, `p_std`
             Sampling parameters:
                 `sigma_min`, `sigma_max`, `rho`
+                `S_min`, `S_max`, `S_noise`
         '''
         super(EDM, self).__init__()
         self.nn_model = nn_model.to(device)
@@ -46,6 +49,9 @@ class EDM(nn.Module):
         self.sigma_min  = number_to_torch_device(sigma_min)
         self.sigma_max  = number_to_torch_device(sigma_max)
         self.rho        = number_to_torch_device(rho)
+        self.S_min      = number_to_torch_device(S_min)
+        self.S_max      = number_to_torch_device(S_max)
+        self.S_noise    = number_to_torch_device(S_noise)
 
     def D_x(self, x_noised, sigma):
         '''
@@ -56,6 +62,8 @@ class EDM(nn.Module):
             Returns:
                 The estimated denoised image tensor `x`.
         '''
+        x_noised = x_noised.to(torch.float32)
+        sigma = sigma.to(torch.float32)
         # Preconditioning
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
         c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
@@ -88,43 +96,44 @@ class EDM(nn.Module):
         return loss_4shape.mean()
 
 
-    def edm_sample(self, n_sample, size, notqdm=False, num_steps=18,
-                   S_churn=0, S_min=0, S_max=float('inf'), S_noise=1):
+    def edm_sample(self, n_sample, size, notqdm=False, num_steps=18, eta=0.0):
         '''
             Sampling with stochastic sampler.
             Args:
                 `n_sample`: The batch size.
                 `size`: The image shape tuple (e.g. `(3, 32, 32)`).
                 `num_steps`: The number of time steps for discretization. Actual NFE is `2 * num_steps - 1`.
-                `S_churn`: controls stochasticity. Set `S_churn=0` for deterministic sampling.
+                `eta`: controls stochasticity. Set `eta=0` for deterministic sampling.
             Returns:
                 The sampled image tensor.
         '''
         sigma_min, sigma_max, rho = self.sigma_min, self.sigma_max, self.rho
+        S_min, S_max, S_noise = self.S_min, self.S_max, self.S_noise
+        gamma_stochasticity = torch.tensor(np.sqrt(2) - 1) * eta # S_churn = (sqrt(2) - 1) * eta * steps
 
         # Time steps
-        times = torch.arange(num_steps, device=self.device)
+        times = torch.arange(num_steps, dtype=torch.float64, device=self.device)
         times = (sigma_max ** (1 / rho) + times / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
-        times = torch.cat([torch.as_tensor(times), torch.zeros_like(times[:1])]) # t_N = 0
+        times = torch.cat([times, torch.zeros_like(times[:1])]) # t_N = 0
         time_pairs = list(zip(times[:-1], times[1:]))
 
-        x_next = torch.randn(n_sample, *size).to(self.device) * times[0]
+        x_next = torch.randn(n_sample, *size).to(self.device).to(torch.float64) * times[0]
         for i, (t_cur, t_next) in enumerate(tqdm(time_pairs, disable=notqdm)): # 0, ..., N-1
             x_cur = x_next
 
             # Increase noise temporarily.
-            gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= t_cur <= S_max else 0
-            t_hat = torch.as_tensor(t_cur + gamma * t_cur)
+            gamma = gamma_stochasticity if S_min <= t_cur <= S_max else 0
+            t_hat = t_cur + gamma * t_cur
             x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(x_cur)
 
             # Euler step.
-            denoised = self.D_x(x_hat, t_hat)
+            denoised = self.D_x(x_hat, t_hat).to(torch.float64)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 
             # Apply 2nd order correction.
             if i < num_steps - 1:
-                denoised = self.D_x(x_next, t_next)
+                denoised = self.D_x(x_next, t_next).to(torch.float64)
                 d_prime = (x_next - denoised) / t_next
                 x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 

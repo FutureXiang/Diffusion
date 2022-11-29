@@ -17,9 +17,11 @@ network:
 # training params
 n_epoch: 2000
 batch_size: 128
-lrate: 2.0e-4
+lrate: 1.0e-4
+warm_epoch: 13
 load_epoch: -1
 flip: True
+ema: 0.9999
 
 # testing params
 n_sample: 30

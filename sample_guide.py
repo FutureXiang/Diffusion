@@ -94,7 +94,7 @@ def sample(opt):
 
     if local_rank == 0:
         if opt.model_type == 'EDM':
-            gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_edm_steps{steps}_Schurn{eta}")
+            gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_edm_steps{steps}_eta{eta}")
         else:
             if mode == 'DDPM':
                 gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_w{w}_ddpm")
@@ -111,7 +111,7 @@ def sample(opt):
             samples_per_process = 400 // dist.get_world_size()
             args = dict(n_sample=samples_per_process, size=opt.network['image_shape'], guide_w=w, notqdm=(local_rank != 0))
             if opt.model_type == 'EDM':
-                x_gen = model.edm_sample(**args, num_steps=steps, S_churn=eta)
+                x_gen = model.edm_sample(**args, num_steps=steps, eta=eta)
             else:
                 if mode == 'DDPM':
                     x_gen = model.sample(**args)

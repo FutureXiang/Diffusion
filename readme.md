@@ -34,20 +34,26 @@ Sample 50000 images by adapted `sample.py` and `DDPM.py`, with official checkpoi
 - DDIM, with EMA, FID = 4.10
     - The $\bar\alpha_t$ schedule proposed by [DDIM](https://arxiv.org/pdf/2010.02502.pdf) (i.e. $\bar\alpha_0 := 1$, implemented by `torch.cat([torch.tensor([0.0]), torch.linspace(beta1, beta2, T)])`) performs worse on FID than the bugged/unofficial one (implemented by `beta_t = torch.linspace(beta1, beta2, T + 1)`) ?
 ### Training from scratch
+Training / sampling in **DDPM / DDIM** style (with DDPM 35.7M basic network):
 | model                    | EMA | DDPM | DDIM(100 steps) |
 |--------------------------|-----|------|-----------------|
 | (reported in papers)     | yes | 3.17 | 4.16            |
 | (official checkpoint)    | yes | 3.13 | 4.10            |
-| unconditional $^*$       | yes | 3.33 | 4.08            |
-| unconditional $^*$       | no  | 4.44 | 5.41            |
+| unconditional            | yes | 3.15 | 3.59            |
 | conditional (CFG, w=0.3) | yes | 3.08 | 3.42            |
 | conditional (CFG, w=0.3) | no  | 3.25 | 3.20            |
 
-$^*$ Overfitting may be a problem on CIFAR-10. Best FID model (DDIM@100) is found at epoch 1700 instead of 2000.
+Unconditional training / sampling in **EDM** style (with DDPM 35.7M basic network):
+|eta/steps| steps=18 | steps=50 | steps=100 |
+|---------|----------|----------|-----------|
+| eta=0.0 |   3.39   |   3.64   |    3.68   |
+| eta=0.5 |   3.10   |   2.95   |    2.93   |
+| eta=1.0 |   3.12   |   2.84   |    2.97   |
+
+(eta $\eta = \frac{S_{churn} / N}{\sqrt{2}-1}$ controls stochasticity. `eta=0` is equivalent to deterministic sampler.)
 
 ### Some observations
 - BigGAN up/downsampling (proposed by [DDPM++](https://openreview.net/pdf?id=PxTIG12RRHS) and [Beat GANs](https://papers.nips.cc/paper/2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf)) doesn't seem to work on conditional model.
-- EMA doesn't seem to work on conditional model.
 - Ablated attention (resolution @ 32,16,8; heads=4 & dim=64, proposed by [Beat GANs](https://papers.nips.cc/paper/2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf)) has little FID improvement on CIFAR-10, but costs heavily on memory & speed.
 
 ## Citations
