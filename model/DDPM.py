@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-
+from torch.cuda.amp import autocast as autocast
 
 def schedules(betas, T, device, type='DDPM'):
     beta1, beta2 = betas
@@ -61,7 +61,7 @@ class DDPM(nn.Module):
         self.device = device
         self.loss = nn.MSELoss()
 
-    def forward(self, x):
+    def forward(self, x, use_amp=False):
         x = normalize_to_neg_one_to_one(x)
 
         # t ~ Uniform([1, n_T])
@@ -72,11 +72,11 @@ class DDPM(nn.Module):
         x_t = (sche["sqrtab"][_ts, None, None, None] * x +
                sche["sqrtmab"][_ts, None, None, None] * noise)
 
+        with autocast(enabled=use_amp):
+            return self.loss(noise, self.nn_model(x_t, _ts / self.n_T))
 
-        return self.loss(noise, self.nn_model(x_t, _ts / self.n_T))
 
-
-    def sample(self, n_sample, size, notqdm=False):
+    def sample(self, n_sample, size, notqdm=False, use_amp=False):
         sche = self.ddpm_sche
         x_i = torch.randn(n_sample, *size).to(self.device)
         for i in tqdm(range(self.n_T, 0, -1), disable=notqdm):
@@ -85,7 +85,7 @@ class DDPM(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if i > 1 else 0
 
-            eps = self.pred_eps_(x_i, t_is)
+            eps = self.pred_eps_(x_i, t_is, use_amp=use_amp)
 
             # DDPM sampling, `T` steps
             x_i = sche["oneover_sqrta"][i] * \
@@ -96,7 +96,7 @@ class DDPM(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
-    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False):
+    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, use_amp=False):
         def pred_x0_(x_t, eps, ab_t, clip=False):
             x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
             if clip:
@@ -117,7 +117,7 @@ class DDPM(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if time_next > 0 else 0
 
-            eps = self.pred_eps_(x_i, t_is)
+            eps = self.pred_eps_(x_i, t_is, use_amp=use_amp)
 
             # DDIM sampling, `steps` steps
             alpha = sche["alphabar_t"][time]
@@ -131,6 +131,7 @@ class DDPM(nn.Module):
         return x_i
 
 
-    def pred_eps_(self, x_t, t):
-        eps = self.nn_model(x_t, t)
+    def pred_eps_(self, x_t, t, use_amp=False):
+        with autocast(enabled=use_amp):
+            eps = self.nn_model(x_t, t)
         return eps

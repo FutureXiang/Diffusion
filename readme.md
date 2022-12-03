@@ -11,15 +11,15 @@ pip install ema-pytorch
 
 ### Training
 #### Unconditional
-`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 cifar.py       --config config/cifar_unconditional.yaml`
+`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 cifar.py       --config config/cifar_unconditional.yaml --use_amp`
 #### Conditional
-`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 cifar_guide.py --config config/cifar_conditional.yaml`
+`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 cifar_guide.py --config config/cifar_conditional.yaml   --use_amp`
 
 ### Sampling
 #### Unconditional
-`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 sample.py       --config config/cifar_unconditional.yaml --ema`
+`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 sample.py       --config config/cifar_unconditional.yaml --use_amp --ema`
 #### Conditional
-`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 sample_guide.py --config config/cifar_conditional.yaml   --w 0.3`
+`CUDA_VISIBLE_DEVICES=2,3,4,5 python -m torch.distributed.launch --nproc_per_node=4 sample_guide.py --config config/cifar_conditional.yaml   --use_amp --ema --w 0.3`
 
 ### Compute FID
 #### Preprocessing
@@ -39,9 +39,8 @@ Training / sampling in **DDPM / DDIM** style (with DDPM 35.7M basic network):
 |--------------------------|-----|------|-----------------|
 | (reported in papers)     | yes | 3.17 | 4.16            |
 | (official checkpoint)    | yes | 3.13 | 4.10            |
-| unconditional            | yes | 3.15 | 3.59            |
-| conditional (CFG, w=0.3) | yes | 3.08 | 3.42            |
-| conditional (CFG, w=0.3) | no  | 3.25 | 3.20            |
+| unconditional            | yes | 3.00 | 3.59            |
+| conditional (CFG, w=0.3) | yes | 3.19 | 3.39            |
 
 Unconditional training / sampling in **EDM** style (with DDPM 35.7M basic network):
 |eta/steps| steps=18 | steps=50 | steps=100 |

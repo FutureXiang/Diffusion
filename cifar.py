@@ -57,6 +57,7 @@ def DataLoaderDDP(dataset, batch_size, shuffle=True, **kwargs):
 def train(opt):
     yaml_path = opt.config
     local_rank = opt.local_rank
+    use_amp = opt.use_amp
 
     with open(yaml_path, 'r') as f:
         opt = yaml.full_load(f)
@@ -99,7 +100,7 @@ def train(opt):
     print("Using DDP, lr = %f * %d" % (lr, DDP_multiplier))
     lr *= DDP_multiplier
     optim = torch.optim.Adam(diff.parameters(), lr=lr)
-
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     if opt.load_epoch != -1:
         target = os.path.join(model_dir, f"model_{opt.load_epoch}.pth")
@@ -127,10 +128,12 @@ def train(opt):
         for x, c in pbar:
             optim.zero_grad()
             x = x.to(device)
-            loss = diff(x)
-            loss.backward()
+            loss = diff(x, use_amp=use_amp)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optim)
             torch.nn.utils.clip_grad_norm_(parameters=diff.parameters(), max_norm=1.0)
-            optim.step()
+            scaler.step(optim)
+            scaler.update()
 
             # logging
             dist.barrier()
@@ -199,6 +202,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str)
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
+    parser.add_argument("--use_amp", action='store_true', default=False)
     opt = parser.parse_args()
 
     init_seeds(no=opt.local_rank)

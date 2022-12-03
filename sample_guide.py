@@ -50,6 +50,7 @@ def sample(opt):
     print(opt)
     yaml_path = opt.config
     local_rank = opt.local_rank
+    use_amp = opt.use_amp
     mode = opt.mode
     steps = opt.steps
     eta = opt.eta
@@ -109,7 +110,7 @@ def sample(opt):
         with torch.no_grad():
             assert 400 % dist.get_world_size() == 0
             samples_per_process = 400 // dist.get_world_size()
-            args = dict(n_sample=samples_per_process, size=opt.network['image_shape'], guide_w=w, notqdm=(local_rank != 0))
+            args = dict(n_sample=samples_per_process, size=opt.network['image_shape'], guide_w=w, notqdm=(local_rank != 0), use_amp=use_amp)
             if opt.model_type == 'EDM':
                 x_gen = model.edm_sample(**args, num_steps=steps, eta=eta)
             else:
@@ -137,6 +138,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str)
     parser.add_argument('--local_rank', default=-1, type=int,
                         help='node rank for distributed training')
+    parser.add_argument("--use_amp", action='store_true', default=False)
     parser.add_argument("--mode", type=str, choices=['DDPM', 'DDIM'], default='DDIM')
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--eta", type=float, default=0.0)

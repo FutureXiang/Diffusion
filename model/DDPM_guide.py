@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-
+from torch.cuda.amp import autocast as autocast
 
 def schedules(betas, T, device, type='DDPM'):
     beta1, beta2 = betas
@@ -62,7 +62,7 @@ class DDPM_guide(nn.Module):
         self.drop_prob = drop_prob
         self.loss = nn.MSELoss()
 
-    def forward(self, x, c):
+    def forward(self, x, c, use_amp=False):
         x = normalize_to_neg_one_to_one(x)
 
         # t ~ Uniform([1, n_T])
@@ -76,10 +76,11 @@ class DDPM_guide(nn.Module):
         # 0 for conditional, 1 for unconditional
         mask = torch.bernoulli(torch.zeros_like(c) + self.drop_prob).to(self.device)
 
-        return self.loss(noise, self.nn_model(x_t, _ts / self.n_T, c, mask))
+        with autocast(enabled=use_amp):
+            return self.loss(noise, self.nn_model(x_t, _ts / self.n_T, c, mask))
 
 
-    def sample(self, n_sample, size, notqdm=False, guide_w=0.3, n_classes=10):
+    def sample(self, n_sample, size, notqdm=False, guide_w=0.3, n_classes=10, use_amp=False):
         sche = self.ddpm_sche
         c, mask = self.prepare_condition_(n_sample, n_classes)
         x_i = torch.randn(n_sample, *size).to(self.device)
@@ -93,7 +94,7 @@ class DDPM_guide(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if i > 1 else 0
 
-            eps = self.pred_eps_(x_i, t_is, c, mask, guide_w)
+            eps = self.pred_eps_(x_i, t_is, c, mask, guide_w, use_amp=use_amp)
             x_i = x_i[:n_sample]
 
             # DDPM sampling, `T` steps
@@ -105,7 +106,7 @@ class DDPM_guide(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
-    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, guide_w=0.3, n_classes=10):
+    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, guide_w=0.3, n_classes=10, use_amp=False):
         def pred_x0_(x_t, eps, ab_t, clip=False):
             x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
             if clip:
@@ -131,7 +132,7 @@ class DDPM_guide(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if time_next > 0 else 0
 
-            eps = self.pred_eps_(x_i, t_is, c, mask, guide_w)
+            eps = self.pred_eps_(x_i, t_is, c, mask, guide_w, use_amp=use_amp)
             x_i = x_i[:n_sample]
 
             # DDIM sampling, `steps` steps
@@ -146,8 +147,9 @@ class DDPM_guide(nn.Module):
         return x_i
 
 
-    def pred_eps_(self, x_t, t, c, mask, guide_w):
-        eps = self.nn_model(x_t, t, c, mask)
+    def pred_eps_(self, x_t, t, c, mask, guide_w, use_amp=False):
+        with autocast(enabled=use_amp):
+            eps = self.nn_model(x_t, t, c, mask)
         n_sample = eps.shape[0] // 2
         eps1 = eps[:n_sample]
         eps2 = eps[n_sample:]

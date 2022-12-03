@@ -84,7 +84,7 @@ class AttentionBlock(nn.Module):
         # Linear layer for final transformation
         self.output = nn.Linear(n_heads * d_k, n_channels)
 
-        self.scale = d_k ** -0.5
+        self.scale = 1 / math.sqrt(math.sqrt(d_k))
         self.n_heads = n_heads
         self.d_k = d_k
 
@@ -100,7 +100,7 @@ class AttentionBlock(nn.Module):
         qkv = self.projection(h).view(batch_size, -1, self.n_heads, 3 * self.d_k)
         q, k, v = torch.chunk(qkv, 3, dim=-1)
 
-        attn = torch.einsum('bihd,bjhd->bijh', q, k) * self.scale
+        attn = torch.einsum('bihd,bjhd->bijh', q * self.scale, k * self.scale) # More stable with f16 than dividing afterwards
         attn = attn.softmax(dim=2)
         res = torch.einsum('bijh,bjhd->bihd', attn, v)
 
