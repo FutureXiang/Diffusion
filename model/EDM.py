@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+from torch.cuda.amp import autocast as autocast
 
 
 # ===== Normalization (helper functions)
@@ -53,7 +54,7 @@ class EDM(nn.Module):
         self.S_max      = number_to_torch_device(S_max)
         self.S_noise    = number_to_torch_device(S_noise)
 
-    def D_x(self, x_noised, sigma):
+    def D_x(self, x_noised, sigma, use_amp=False):
         '''
             Denoising with network preconditioning.
             Args:
@@ -71,10 +72,11 @@ class EDM(nn.Module):
         c_noise = sigma.log() / 4
 
         # Denoising
-        F_x = self.nn_model(c_in * x_noised, c_noise.flatten())
+        with autocast(enabled=use_amp):
+            F_x = self.nn_model(c_in * x_noised, c_noise.flatten())
         return c_skip * x_noised + c_out * F_x
 
-    def forward(self, x):
+    def forward(self, x, use_amp=False):
         '''
             Training with weighted denoising loss.
             Args:
@@ -92,11 +94,11 @@ class EDM(nn.Module):
 
         # Weighted Denoising loss
         weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
-        loss_4shape = weight * ((x - self.D_x(x_noised, sigma)) ** 2)
+        loss_4shape = weight * ((x - self.D_x(x_noised, sigma, use_amp=use_amp)) ** 2)
         return loss_4shape.mean()
 
 
-    def edm_sample(self, n_sample, size, notqdm=False, num_steps=18, eta=0.0):
+    def edm_sample(self, n_sample, size, notqdm=False, num_steps=18, eta=0.0, use_amp=False):
         '''
             Sampling with stochastic sampler.
             Args:
@@ -127,7 +129,7 @@ class EDM(nn.Module):
             x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(x_cur)
 
             # Euler step.
-            denoised = self.D_x(x_hat, t_hat).to(torch.float64)
+            denoised = self.D_x(x_hat, t_hat, use_amp=use_amp).to(torch.float64)
             d_cur = (x_hat - denoised) / t_hat
             x_next = x_hat + (t_next - t_hat) * d_cur
 

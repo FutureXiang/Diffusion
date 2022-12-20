@@ -18,7 +18,7 @@ network:
   is_attn: [False, True, False, False]
   dropout: 0.13
   n_blocks: 2
-  use_res_for_updown: False
+  use_res_for_updown: True
 
 # training params
 n_epoch: 2000
@@ -31,5 +31,5 @@ ema: 0.9993
 
 # testing params
 n_sample: 30
-save_dir: './2000_unconditional_EDM'
+save_dir: './2000_unconditional_EDM39M'
 save_model: True
