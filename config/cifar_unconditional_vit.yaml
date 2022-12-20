@@ -1,0 +1,30 @@
+# model params
+model_type: 'DDPM'
+net_type: 'UViT'
+diffusion:
+  n_T: 1000
+  betas: [1.0e-4, 0.02]
+network:
+  image_shape: [3, 32, 32]
+  embed_dim: 512
+  patch_size: 2
+  depth: 12
+  num_heads: 8
+
+# training params
+n_epoch: 1300
+batch_size: 64
+lrate: 1.0e-4
+optim: 'AdamW'
+optim_args:
+  weight_decay: 0.03
+  betas: [0.99, 0.999]
+warm_epoch: 13
+load_epoch: -1
+flip: True
+ema: 0.9999
+
+# testing params
+n_sample: 30
+save_dir: './1300_unconditional_vit'
+save_model: True

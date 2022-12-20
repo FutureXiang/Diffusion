@@ -10,13 +10,7 @@ from torchvision.utils import make_grid, save_image
 from ema_pytorch import EMA
 
 from model.models import get_models_class
-
-# ===== Config yaml files (helper functions)
-
-class Config(object):
-    def __init__(self, dic):
-        for key in dic:
-            setattr(self, key, dic[key])
+from utils import Config, init_seeds, gather_tensor
 
 
 def get_default_steps(model_type, steps):
@@ -25,24 +19,6 @@ def get_default_steps(model_type, steps):
     else:
         return {'DDPM': 100, 'EDM': 18}[model_type]
 
-# ===== Multi-GPU training (helper functions)
-
-def init_seeds(RANDOM_SEED=1337, no=0):
-    RANDOM_SEED += no
-    print("local_rank = {}, seed = {}".format(no, RANDOM_SEED))
-    random.seed(RANDOM_SEED)
-    np.random.seed(RANDOM_SEED)
-    torch.manual_seed(RANDOM_SEED)
-    torch.cuda.manual_seed_all(RANDOM_SEED)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def gather_tensor(tensor):
-    tensor_list = [tensor.clone() for _ in range(dist.get_world_size())]
-    dist.all_gather(tensor_list, tensor)
-    tensor_list = torch.cat(tensor_list, dim=0)
-    return tensor_list
 
 # ===== sampling =====
 

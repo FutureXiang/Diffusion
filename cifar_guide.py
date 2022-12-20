@@ -1,12 +1,9 @@
 import argparse
 import os
-import random
 
-import numpy as np
 import torch
 import torch.distributed as dist
 import yaml
-from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets import CIFAR10
 from torchvision.utils import make_grid, save_image
@@ -14,6 +11,7 @@ from tqdm import tqdm
 from ema_pytorch import EMA
 
 from model.models import get_models_class
+from utils import Config, get_optimizer, init_seeds, reduce_tensor, DataLoaderDDP
 
 # ===== Visualize (helper functions)
 
@@ -31,42 +29,6 @@ def get_real_samples_grid(x, c, size, opt):
             x_real[k + (j * opt.network['n_classes'])] = x[idx]
     return x_real
 
-# ===== Config yaml files (helper functions)
-
-class Config(object):
-    def __init__(self, dic):
-        for key in dic:
-            setattr(self, key, dic[key])
-
-# ===== Multi-GPU training (helper functions)
-
-def init_seeds(RANDOM_SEED=1337, no=0):
-    RANDOM_SEED += no
-    print("local_rank = {}, seed = {}".format(no, RANDOM_SEED))
-    random.seed(RANDOM_SEED)
-    np.random.seed(RANDOM_SEED)
-    torch.manual_seed(RANDOM_SEED)
-    torch.cuda.manual_seed_all(RANDOM_SEED)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def reduce_tensor(tensor):
-    rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-    rt /= dist.get_world_size()
-    return rt
-
-
-def DataLoaderDDP(dataset, batch_size, shuffle=True, **kwargs):
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset, shuffle=shuffle)
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        sampler=sampler,
-        num_workers=1,
-    )
-    return dataloader, sampler
 
 # ===== training =====
 
@@ -115,7 +77,7 @@ def train(opt):
     DDP_multiplier = dist.get_world_size()
     print("Using DDP, lr = %f * %d" % (lr, DDP_multiplier))
     lr *= DDP_multiplier
-    optim = torch.optim.Adam(diff.parameters(), lr=lr)
+    optim = get_optimizer(diff.parameters(), opt, lr=lr)
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     if opt.load_epoch != -1:

@@ -3,10 +3,11 @@ from .DDPM_guide import DDPM_guide
 from .EDM import EDM
 from .unet import UNet
 from .unet_guide import UNet_guide
+from .uvit import UViT
 
 CLASSES = {
     cls.__name__: cls
-    for cls in [DDPM, DDPM_guide, EDM, UNet, UNet_guide]
+    for cls in [DDPM, DDPM_guide, EDM, UNet, UNet_guide, UViT]
 }
 
 
