@@ -147,6 +147,7 @@ class UNet_guide(nn.Module):
 
         # Class embedding layer.
         self.class_emb = ClassEmbedding(n_classes, time_channels)
+        self.num_classes = n_classes
 
         # Down stages
         down = []

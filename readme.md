@@ -34,7 +34,7 @@ Training / sampling in **[DDPM](https://proceedings.neurips.cc/paper/2020/file/4
 |----------------------------------------------------------------------|-----|------|-----------------|
 | (reported in papers)                                                 | yes | 3.17 | 4.16            |
 | ([official checkpoint](https://github.com/pesser/pytorch_diffusion)) | yes | 3.13 | 4.10            |
-| unconditional                                                        | yes | 3.00 | 3.59            |
+| unconditional                                                        | yes | 3.11 | 3.61            |
 | conditional ([CFG](https://arxiv.org/pdf/2207.12598.pdf), w=0.3)     | yes | 3.19 | 3.39            |
 
 Some observations:
@@ -49,16 +49,34 @@ Unconditional training / sampling in **[EDM](https://arxiv.org/pdf/2206.00364.pd
 | eta=0.5 |   3.10   |   2.95   |    2.93   |
 | eta=1.0 |   3.12   |   2.84   |    2.97   |
 
-With BigGAN-style up/downsampling blocks (`use_res_for_updown=True`), FID further improves to:
+With a scaled 56.5M network, FID further improves to:
 |eta/steps| steps=18 | steps=50 | steps=100 |
 |---------|----------|----------|-----------|
-| eta=0.0 |   3.01   |   3.08   |    3.10   |
-| eta=0.5 |   3.10   |   2.73   |    2.57   |
-| eta=1.0 |   3.40   |   2.72   |  **2.50** |
+| eta=0.0 |   2.21   |   2.25   |    2.27   |
+| eta=0.5 |   2.34   |   2.21   |    2.25   |
+| eta=1.0 |   2.65   |   2.33   |    2.48   |
+
+Conditional model with Classifier-Free Guidance (CFG):
+|unconditional (w=-1)|no guidance (w=0.0)|CFG, w=0.3|
+|--------------------|-------------------|----------|
+| 5.81               | 2.12              |   2.00   |
+
+Detailed sampling results:
+|eta/steps| steps=18 | steps=50 | steps=100 |
+|---------|----------|----------|-----------|
+| eta=0.0 |   2.00   |   2.08   |    2.10   |
+| eta=0.5 |   2.25   |   2.19   |    2.23   |
+| eta=1.0 |   2.65   |   2.34   |    2.43   |
+
+Comparing to the official paper:
+| model                    | EMA | Unconditional | Conditional |
+|--------------------------|-----|---------------|-------------|
+| (reported in papers)     | yes | 2.05          | 1.88        |
+| this implementation      | yes | 2.21          | 2.00        |
 
 Note that:
 - eta $\eta = \frac{S_{churn} / N}{\sqrt{2}-1}$ controls stochasticity. `eta=0.0` is equivalent to a deterministic sampler.
-- EDM uses a 2nd order sampler and the actual neural function evaluations (NFEs) equal to $2\times$steps.
+- To add CFG for the 2nd order EDM sampler, it's better to apply guidance only on the Euler step and perform 2nd order correction without guidance.
 
 ## Citations
 This implementation is based on / inspired by:

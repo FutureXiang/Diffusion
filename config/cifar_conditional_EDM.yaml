@@ -19,6 +19,7 @@ network:
   dropout: 0.13
   n_blocks: 4
   use_res_for_updown: True
+  n_classes : 10
 
 # training params
 n_epoch: 2000
@@ -31,5 +32,6 @@ ema: 0.9993
 
 # testing params
 n_sample: 30
-save_dir: './2000_unconditional_EDMlarge'
+w: 0.3
+save_dir: './2000_conditional_EDMlarge'
 save_model: True

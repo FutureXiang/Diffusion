@@ -80,22 +80,17 @@ class DDPM_guide(nn.Module):
             return self.loss(noise, self.nn_model(x_t, _ts / self.n_T, c, mask))
 
 
-    def sample(self, n_sample, size, notqdm=False, guide_w=0.3, n_classes=10, use_amp=False):
+    def sample(self, n_sample, size, notqdm=False, guide_w=0.3, use_amp=False):
         sche = self.ddpm_sche
-        c, mask = self.prepare_condition_(n_sample, n_classes)
+        model_args = self.prepare_condition_(n_sample)
         x_i = torch.randn(n_sample, *size).to(self.device)
         for i in tqdm(range(self.n_T, 0, -1), disable=notqdm):
             t_is = torch.tensor([i / self.n_T]).to(self.device)
             t_is = t_is.repeat(n_sample)
 
-            # double batch
-            x_i = x_i.repeat(2, 1, 1, 1)
-            t_is = t_is.repeat(2)
-
             z = torch.randn(n_sample, *size).to(self.device) if i > 1 else 0
 
-            eps = self.pred_eps_(x_i, t_is, c, mask, guide_w, use_amp=use_amp)
-            x_i = x_i[:n_sample]
+            eps = self.pred_eps_(x_i, t_is, model_args, guide_w, use_amp)
 
             # DDPM sampling, `T` steps
             x_i = sche["oneover_sqrta"][i] * \
@@ -106,7 +101,7 @@ class DDPM_guide(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
-    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, guide_w=0.3, n_classes=10, use_amp=False):
+    def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, guide_w=0.3, use_amp=False):
         def pred_x0_(x_t, eps, ab_t, clip=False):
             x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
             if clip:
@@ -114,7 +109,7 @@ class DDPM_guide(nn.Module):
             return x_start
 
         sche = self.ddim_sche
-        c, mask = self.prepare_condition_(n_sample, n_classes)
+        model_args = self.prepare_condition_(n_sample)
         x_i = torch.randn(n_sample, *size).to(self.device)
 
         times = torch.arange(0, self.n_T, self.n_T // steps) + 1
@@ -126,14 +121,9 @@ class DDPM_guide(nn.Module):
             t_is = torch.tensor([time / self.n_T]).to(self.device)
             t_is = t_is.repeat(n_sample)
 
-            # double batch
-            x_i = x_i.repeat(2, 1, 1, 1)
-            t_is = t_is.repeat(2)
-
             z = torch.randn(n_sample, *size).to(self.device) if time_next > 0 else 0
 
-            eps = self.pred_eps_(x_i, t_is, c, mask, guide_w, use_amp=use_amp)
-            x_i = x_i[:n_sample]
+            eps = self.pred_eps_(x_i, t_is, model_args, guide_w, use_amp)
 
             # DDIM sampling, `steps` steps
             alpha = sche["alphabar_t"][time]
@@ -147,9 +137,13 @@ class DDPM_guide(nn.Module):
         return x_i
 
 
-    def pred_eps_(self, x_t, t, c, mask, guide_w, use_amp=False):
+    def pred_eps_(self, x, t, model_args, guide_w, use_amp):
+        # double batch
+        x_double = x.repeat(2, 1, 1, 1)
+        t_double = t.repeat(2)
+
         with autocast(enabled=use_amp):
-            eps = self.nn_model(x_t, t, c, mask)
+            eps = self.nn_model(x_double, t_double, *model_args)
         n_sample = eps.shape[0] // 2
         eps1 = eps[:n_sample]
         eps2 = eps[n_sample:]
@@ -157,7 +151,8 @@ class DDPM_guide(nn.Module):
         eps = (1 + guide_w) * eps1 - guide_w * eps2
         return eps
 
-    def prepare_condition_(self, n_sample, n_classes):
+    def prepare_condition_(self, n_sample):
+        n_classes = self.nn_model.num_classes
         assert n_sample % n_classes == 0
         c = torch.arange(n_classes).to(self.device)
         c = c.repeat(n_sample // n_classes)

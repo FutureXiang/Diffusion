@@ -85,7 +85,7 @@ class DDPM(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if i > 1 else 0
 
-            eps = self.pred_eps_(x_i, t_is, use_amp=use_amp)
+            eps = self.pred_eps_(x_i, t_is, use_amp)
 
             # DDPM sampling, `T` steps
             x_i = sche["oneover_sqrta"][i] * \
@@ -117,7 +117,7 @@ class DDPM(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if time_next > 0 else 0
 
-            eps = self.pred_eps_(x_i, t_is, use_amp=use_amp)
+            eps = self.pred_eps_(x_i, t_is, use_amp)
 
             # DDIM sampling, `steps` steps
             alpha = sche["alphabar_t"][time]
@@ -131,7 +131,7 @@ class DDPM(nn.Module):
         return x_i
 
 
-    def pred_eps_(self, x_t, t, use_amp=False):
+    def pred_eps_(self, x, t, use_amp):
         with autocast(enabled=use_amp):
-            eps = self.nn_model(x_t, t)
+            eps = self.nn_model(x, t)
         return eps
