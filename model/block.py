@@ -64,6 +64,24 @@ class ClassEmbedding(nn.Module):
         return emb
 
 
+class ClassEmbeddingTable(nn.Module):
+    """
+    Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance.
+    """
+    def __init__(self, n_classes, n_channels):
+        super().__init__()
+        self.n_classes = n_classes
+        self.embedding_table = nn.Embedding(n_classes + 1, n_channels)
+
+    def forward(self, c, drop_mask):
+        assert (c < self.n_classes).all()
+        c = torch.where(drop_mask==0, c, self.n_classes)
+        assert ((c == self.n_classes) == (drop_mask)).all()
+
+        embeddings = self.embedding_table(c)
+        return embeddings
+
+
 class AttentionBlock(nn.Module):
     def __init__(self, n_channels, n_heads=1, d_k=None):
         """

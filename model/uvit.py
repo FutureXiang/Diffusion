@@ -3,6 +3,7 @@ import torch.nn as nn
 import math
 from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
+from .block import ClassEmbeddingTable
 import einops
 
 
@@ -36,12 +37,12 @@ def unpatchify(x, channels=3):
 
 
 class Block(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4, skip=False):
+    def __init__(self, dim, num_heads, skip=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
         self.attn = Attention(dim, num_heads=num_heads)
         self.norm2 = nn.LayerNorm(dim)
-        self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio))
+        self.mlp = Mlp(in_features=dim, hidden_features=int(dim * 4))
         self.skip_linear = nn.Linear(2 * dim, dim) if skip else None
 
     def forward(self, x, skip=None):
@@ -52,9 +53,29 @@ class Block(nn.Module):
         return x
 
 
+class FinalLayer(nn.Module):
+    def __init__(self, dim, patch_size, out_channels, extras, conv=True):
+        super().__init__()
+        self.extras = extras
+        self.out_channels = out_channels
+
+        self.norm = nn.LayerNorm(dim)
+        self.linear = nn.Linear(dim, patch_size * patch_size * out_channels, bias=True)
+        self.conv = nn.Conv2d(out_channels, out_channels, 3, padding=1) if conv else nn.Identity()
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.linear(x)
+        x = x[:, self.extras:, :]
+        x = unpatchify(x, self.out_channels)
+        x = self.conv(x)
+        return x
+
+
 class UViT(nn.Module):
     def __init__(self, image_shape = [3, 32, 32], embed_dim = 512,
-                 patch_size = 2, depth = 12, num_heads = 8):
+                 patch_size = 2, depth = 12, num_heads = 8,
+                 final_conv=True, skip=True, n_classes=-1):
         super().__init__()
         self.embed_dim = embed_dim
         self.in_chn = image_shape[0]
@@ -63,7 +84,12 @@ class UViT(nn.Module):
             img_size=image_shape[1:], patch_size=patch_size, in_chans=self.in_chn, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        self.extras = 1
+        self.num_classes = n_classes
+        if n_classes != -1:
+            self.label_emb = ClassEmbeddingTable(n_classes, embed_dim)
+            self.extras = 2
+        else:
+            self.extras = 1
         self.pos_embed = nn.Parameter(torch.zeros(1, self.extras + num_patches, embed_dim))
 
         self.in_blocks = nn.ModuleList([
@@ -73,13 +99,10 @@ class UViT(nn.Module):
         self.mid_block = Block(dim=embed_dim, num_heads=num_heads)
 
         self.out_blocks = nn.ModuleList([
-            Block(dim=embed_dim, num_heads=num_heads, skip=True)
+            Block(dim=embed_dim, num_heads=num_heads, skip=skip)
             for _ in range(depth // 2)])
 
-        self.norm = nn.LayerNorm(embed_dim)
-        self.patch_dim = patch_size ** 2 * self.in_chn
-        self.decoder_pred = nn.Linear(embed_dim, self.patch_dim, bias=True)
-        self.final_layer = nn.Conv2d(self.in_chn, self.in_chn, 3, padding=1)
+        self.final = FinalLayer(embed_dim, patch_size, self.in_chn, self.extras, final_conv)
 
         trunc_normal_(self.pos_embed, std=.02)
         self.apply(self._init_weights)
@@ -97,13 +120,17 @@ class UViT(nn.Module):
     def no_weight_decay(self):
         return {'pos_embed'}
 
-    def forward(self, x, timesteps):
+    def forward(self, x, timesteps, c=None, drop_mask=None):
         x = self.patch_embed(x)
         B, L, D = x.shape
 
         time_token = timestep_embedding(timesteps, self.embed_dim)
         time_token = time_token.unsqueeze(dim=1)
         x = torch.cat((time_token, x), dim=1)
+        if c is not None:
+            label_emb = self.label_emb(c, drop_mask)
+            label_emb = label_emb.unsqueeze(dim=1)
+            x = torch.cat((label_emb, x), dim=1)
         x = x + self.pos_embed
 
         skips = []
@@ -116,13 +143,7 @@ class UViT(nn.Module):
         for blk in self.out_blocks:
             x = blk(x, skips.pop())
 
-        x = self.norm(x)
-
-        x = self.decoder_pred(x)
-        assert x.size(1) == self.extras + L
-        x = x[:, self.extras:, :]
-        x = unpatchify(x, self.in_chn)
-        x = self.final_layer(x)
+        x = self.final(x)
         return x
 
 

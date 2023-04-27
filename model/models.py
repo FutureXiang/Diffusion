@@ -15,5 +15,6 @@ CLASSES = {
 def get_models_class(model_type='DDPM', net_type='UNet', guide=False):
     if guide:
         model_type += '_guide'
-        net_type += '_guide'
+        if net_type == 'UNet':
+            net_type += '_guide'
     return CLASSES[model_type], CLASSES[net_type]
