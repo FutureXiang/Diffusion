@@ -187,6 +187,26 @@ class UNet(nn.Module):
         self.act = nn.SiLU()
         self.final = nn.Conv2d(out_channels, image_shape[0], kernel_size=3, padding=1)
 
+    def get_activation(self, *args, **kwargs):
+        activation = {}
+        def namedHook(name):
+            def hook(module, input, output):
+                activation[name] = output
+            return hook
+        hooks = {}
+        hooks['mid'] = self.middle.register_forward_hook(namedHook('mid'))
+        no = 0
+        for blk in self.up:
+            if isinstance(blk, ResAttBlock):
+                no += 1
+                name = f'out_{no}'
+                hooks[name] = blk.register_forward_hook(namedHook(name))
+
+        self.forward(*args, **kwargs)
+        for name in hooks:
+            hooks[name].remove()
+        return activation
+
     def forward(self, x, t):
         """
         * `x` has shape `[batch_size, in_channels, height, width]`

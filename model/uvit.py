@@ -120,6 +120,23 @@ class UViT(nn.Module):
     def no_weight_decay(self):
         return {'pos_embed'}
 
+    def get_activation(self, *args, **kwargs):
+        activation = {}
+        def namedHook(name):
+            def hook(module, input, output):
+                activation[name] = output
+            return hook
+        hooks = {}
+        hooks['mid'] = self.mid_block.register_forward_hook(namedHook('mid'))
+        for no, blk in enumerate(self.out_blocks):
+            name = f'out_{no + 1}'
+            hooks[name] = blk.register_forward_hook(namedHook(name))
+
+        self.forward(*args, **kwargs)
+        for name in hooks:
+            hooks[name].remove()
+        return activation
+
     def forward(self, x, timesteps, c=None, drop_mask=None):
         x = self.patch_embed(x)
         B, L, D = x.shape

@@ -54,7 +54,7 @@ class EDM(nn.Module):
         self.S_max      = number_to_torch_device(S_max)
         self.S_noise    = number_to_torch_device(S_noise)
 
-    def D_x(self, x_noised, sigma, use_amp):
+    def D_x(self, x_noised, sigma, use_amp, get_activation=False):
         '''
             Denoising with network preconditioning.
             Args:
@@ -72,6 +72,10 @@ class EDM(nn.Module):
         c_noise = sigma.log() / 4
 
         # Denoising
+        if get_activation:
+            with autocast(enabled=use_amp):
+                return self.nn_model.get_activation(c_in * x_noised, c_noise.flatten())
+
         with autocast(enabled=use_amp):
             F_x = self.nn_model(c_in * x_noised, c_noise.flatten())
         return c_skip * x_noised + c_out * F_x
@@ -97,6 +101,38 @@ class EDM(nn.Module):
         loss_4shape = weight * ((x - self.D_x(x_noised, sigma, use_amp)) ** 2)
         return loss_4shape.mean()
 
+    def get_feature(self, x, t, norm, num_steps=18, use_amp=False):
+        x = normalize_to_neg_one_to_one(x)
+
+        # Time steps
+        sigma_min, sigma_max, rho = self.sigma_min, self.sigma_max, self.rho
+        times = torch.arange(num_steps, dtype=torch.float64, device=self.device)
+        times = (sigma_max ** (1 / rho) + times / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
+        times = torch.cat([times, torch.zeros_like(times[:1])]) # t_N = 0
+        times = reversed(times)
+        # Perturbation
+        sigma = times[t]
+        noise = torch.randn_like(x)
+        x_noised = x + noise * sigma
+
+        ret = {}
+        feats = self.D_x(x_noised, sigma, use_amp, get_activation=True)
+        for blockname in feats:
+            feat = feats[blockname].float()
+            if len(feat.shape) == 4:
+                # unet (B, C, H, W)
+                feat = feat.view(feat.shape[0], feat.shape[1], -1)
+                feat = torch.mean(feat, dim=2)
+            elif len(feat.shape) == 3:
+                # vit (B, L, D)
+                feat = feat[:, self.nn_model.extras:, :] # optional
+                feat = torch.mean(feat, dim=1)
+            else:
+                raise NotImplementedError
+            if norm:
+                feat = torch.nn.functional.normalize(feat)
+            ret[blockname] = feat
+        return ret
 
     def edm_sample(self, n_sample, size, notqdm=False, num_steps=18, eta=0.0, use_amp=False):
         '''

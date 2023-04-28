@@ -26,3 +26,11 @@ ema: 0.9999
 n_sample: 30
 save_dir: './2000_unconditional'
 save_model: True
+
+# linear probe
+linear:
+  n_epoch: 10
+  batch_size: 128
+  lrate: 1.0e-3
+  timestep: 11
+  blockname: 'out_7'

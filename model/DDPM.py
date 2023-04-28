@@ -75,6 +75,35 @@ class DDPM(nn.Module):
         with autocast(enabled=use_amp):
             return self.loss(noise, self.nn_model(x_t, _ts / self.n_T))
 
+    def get_feature(self, x, t, norm, use_amp=False):
+        x = normalize_to_neg_one_to_one(x)
+
+        _ts = torch.tensor([t]).to(self.device).repeat(x.shape[0])
+        noise = torch.randn_like(x)
+
+        sche = self.ddpm_sche
+        x_t = (sche["sqrtab"][_ts, None, None, None] * x +
+               sche["sqrtmab"][_ts, None, None, None] * noise)
+
+        ret = {}
+        with autocast(enabled=use_amp):
+            feats = self.nn_model.get_activation(x_t, _ts / self.n_T)
+        for blockname in feats:
+            feat = feats[blockname].float()
+            if len(feat.shape) == 4:
+                # unet (B, C, H, W)
+                feat = feat.view(feat.shape[0], feat.shape[1], -1)
+                feat = torch.mean(feat, dim=2)
+            elif len(feat.shape) == 3:
+                # vit (B, L, D)
+                feat = feat[:, self.nn_model.extras:, :] # optional
+                feat = torch.mean(feat, dim=1)
+            else:
+                raise NotImplementedError
+            if norm:
+                feat = torch.nn.functional.normalize(feat)
+            ret[blockname] = feat
+        return ret
 
     def sample(self, n_sample, size, notqdm=False, use_amp=False):
         sche = self.ddpm_sche

@@ -1,3 +1,4 @@
+import os
 import random
 import numpy as np
 import torch
@@ -55,3 +56,7 @@ def DataLoaderDDP(dataset, batch_size, shuffle=True):
         num_workers=1,
     )
     return dataloader, sampler
+
+def print0(*args, **kwargs):
+    if 'LOCAL_RANK' not in os.environ or int(os.environ['LOCAL_RANK']) == 0:
+        print(*args, **kwargs)
