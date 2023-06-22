@@ -31,6 +31,7 @@ Use `extract_cifar10_pngs.ipynb` to convert CIFAR-10 training dataset to 50000 p
 |             Config             | Diffusion Model |   Network   | Conditional |      FID (best)        |  FID (fast sampling)   |           Note          |
 |--------------------------------|-----------------|-------------|-------------|------------------------|------------------------|-------------------------|
 | `cifar_unconditional.yaml`     |     DDPM        |  35.7M UNet |     no      | 3.11 (DDPM, 1000 NFE)  | 3.61 (DDIM, 100 NFE)   | official: 3.17/4.16     |
+| `cifar_unconditional_cosine.yaml`|DDPM (cosine)  |  35.7M UNet |     no      | 3.13 (DDPM, 1000 NFE)  | 3.53 (DDIM, 100 NFE)   | 700 epochs training, more efficient |
 | `cifar_conditional.yaml`       |     DDPM        |  38.6M UNet |     yes     | 3.19 (DDPM, 2000 NFE)  | 3.39 (DDIM, 200 NFE)   | guidance weight `w=0.3` |
 | `cifar_unconditional_vit.yaml` |     DDPM        |  44.3M UViT |     no      | 3.18 (DDPM, 1000 NFE)  | 4.15 (DDIM, 100 NFE)   | official: 3.11          |
 | `cifar_conditional_vit.yaml`   |     DDPM        |  44.3M UViT |     yes     | 2.87 (DDPM, 2000 NFE)  | 3.32 (DDIM, 200 NFE)   | guidance weight `w=0.3` |

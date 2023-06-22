@@ -3,15 +3,36 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from torch.cuda.amp import autocast as autocast
+import math
+from functools import partial
+
+def linear_beta_schedule(timesteps, beta1, beta2):
+    assert 0.0 < beta1 < beta2 < 1.0, "beta1 and beta2 must be in (0, 1)"
+    return torch.linspace(beta1, beta2, timesteps)
+
+def cosine_beta_schedule(timesteps, s = 0.008):
+    """
+    cosine schedule
+    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
+    """
+    steps = timesteps + 1
+    t = torch.linspace(0, timesteps, steps) / timesteps # dtype = torch.float64
+    alphas_cumprod = torch.cos((t + s) / (1 + s) * math.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999)
 
 def schedules(betas, T, device, type='DDPM'):
-    beta1, beta2 = betas
-    assert 0.0 < beta1 < beta2 < 1.0, "beta1 and beta2 must be in (0, 1)"
+    if betas == 'cosine':
+        schedule_fn = cosine_beta_schedule
+    else:
+        beta1, beta2 = betas
+        schedule_fn = partial(linear_beta_schedule, beta1=beta1, beta2=beta2)
 
     if type == 'DDPM':
-        beta_t = torch.cat([torch.tensor([0.0]), torch.linspace(beta1, beta2, T)])
+        beta_t = torch.cat([torch.tensor([0.0]), schedule_fn(T)])
     elif type == 'DDIM':
-        beta_t = torch.linspace(beta1, beta2, T + 1)
+        beta_t = schedule_fn(T + 1)
     else:
         raise NotImplementedError()
     sqrt_beta_t = torch.sqrt(beta_t)
@@ -49,7 +70,7 @@ def unnormalize_to_zero_to_one(t):
 
 
 class DDPM(nn.Module):
-    def __init__(self, nn_model, betas, n_T, device):
+    def __init__(self, nn_model, betas, n_T, device, pred_target='eps'):
         super(DDPM, self).__init__()
         self.nn_model = nn_model.to(device)
         params = sum(p.numel() for p in nn_model.parameters() if p.requires_grad) / 1e6
@@ -59,6 +80,8 @@ class DDPM(nn.Module):
         self.ddim_sche = schedules(betas, n_T, device, 'DDIM')
         self.n_T = n_T
         self.device = device
+        assert pred_target in ['eps', 'x0']
+        self.pred_target = pred_target
         self.loss = nn.MSELoss()
 
     def forward(self, x, use_amp=False):
@@ -72,8 +95,16 @@ class DDPM(nn.Module):
         x_t = (sche["sqrtab"][_ts, None, None, None] * x +
                sche["sqrtmab"][_ts, None, None, None] * noise)
 
-        with autocast(enabled=use_amp):
-            return self.loss(noise, self.nn_model(x_t, _ts / self.n_T))
+        if self.pred_target == 'x0':
+            SNR = (sche["sqrtab"][_ts, None, None, None] ** 2) / \
+                  (sche["sqrtmab"][_ts, None, None, None] ** 2)
+            SNR.clamp_(max = 5)
+            with autocast(enabled=use_amp):
+                loss_4shape = SNR * (x - self.nn_model(x_t, _ts / self.n_T)) ** 2
+            return loss_4shape.mean()
+        else:
+            with autocast(enabled=use_amp):
+                return self.loss(noise, self.nn_model(x_t, _ts / self.n_T))
 
     def get_feature(self, x, t, norm, use_amp=False):
         x = normalize_to_neg_one_to_one(x)
@@ -114,7 +145,8 @@ class DDPM(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if i > 1 else 0
 
-            eps = self.pred_eps_(x_i, t_is, use_amp)
+            alpha = sche["alphabar_t"][i]
+            eps, _ = self.pred_eps_(x_i, t_is, alpha, use_amp)
 
             # DDPM sampling, `T` steps
             x_i = sche["oneover_sqrta"][i] * \
@@ -126,12 +158,6 @@ class DDPM(nn.Module):
         return x_i
 
     def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, use_amp=False):
-        def pred_x0_(x_t, eps, ab_t, clip=False):
-            x_start = (x_t - (1 - ab_t).sqrt() * eps) / ab_t.sqrt()
-            if clip:
-                x_start = torch.clip(x_start, min=-1.0, max=1.0)
-            return x_start
-
         sche = self.ddim_sche
         x_i = torch.randn(n_sample, *size).to(self.device)
 
@@ -146,11 +172,9 @@ class DDPM(nn.Module):
 
             z = torch.randn(n_sample, *size).to(self.device) if time_next > 0 else 0
 
-            eps = self.pred_eps_(x_i, t_is, use_amp)
-
             # DDIM sampling, `steps` steps
             alpha = sche["alphabar_t"][time]
-            x0_t = pred_x0_(x_i, eps, alpha)
+            eps, x0_t = self.pred_eps_(x_i, t_is, alpha, use_amp)
             alpha_next = sche["alphabar_t"][time_next]
             c1 = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c2 = (1 - alpha_next - c1 ** 2).sqrt()
@@ -159,8 +183,25 @@ class DDPM(nn.Module):
         x_i = unnormalize_to_zero_to_one(x_i)
         return x_i
 
+    def pred_eps_(self, x, t, alpha, use_amp, clip_x=True):
+        def pred_eps_from_x0(x0):
+            return (x - x0 * alpha.sqrt()) / (1 - alpha).sqrt()
 
-    def pred_eps_(self, x, t, use_amp):
-        with autocast(enabled=use_amp):
-            eps = self.nn_model(x, t)
-        return eps
+        def pred_x0_from_eps(eps):
+            return (x - (1 - alpha).sqrt() * eps) / alpha.sqrt()
+
+        # get prediction of x0
+        if self.pred_target == 'x0':
+            with autocast(enabled=use_amp):
+                x0_t = self.nn_model(x, t).float()
+        else:
+            with autocast(enabled=use_amp):
+                eps = self.nn_model(x, t).float()
+            x0_t = pred_x0_from_eps(eps)
+        # pixel-space clipping (optional)
+        if clip_x:
+            x0_t = torch.clip(x0_t, -1., 1.)
+        # get prediction or update of eps
+        if clip_x or self.pred_target == 'x0':
+            eps = pred_eps_from_x0(x0_t)
+        return eps, x0_t
