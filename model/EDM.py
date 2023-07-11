@@ -176,7 +176,10 @@ class EDM(nn.Module):
         x_next = unnormalize_to_zero_to_one(x_next)
         return x_next
 
-    def pred_eps_(self, x, t, use_amp):
+    def pred_eps_(self, x, t, use_amp, clip_x=True):
         denoised = self.D_x(x, t, use_amp).to(torch.float64)
+        # pixel-space clipping (optional)
+        if clip_x:
+            denoised = torch.clip(denoised, -1., 1.)
         eps = (x - denoised) / t
         return eps

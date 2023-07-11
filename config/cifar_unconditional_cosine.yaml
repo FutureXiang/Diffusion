@@ -29,7 +29,7 @@ save_model: True
 
 # linear probe
 linear:
-  n_epoch: 10
+  n_epoch: 15
   batch_size: 128
   lrate: 1.0e-3
   timestep: 21
