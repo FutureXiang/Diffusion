@@ -22,7 +22,7 @@ network:
   n_classes : 10
 
 # training params
-n_epoch: 2000
+n_epoch: 1200
 batch_size: 64
 lrate: 1.0e-4
 warm_epoch: 200
@@ -33,5 +33,5 @@ ema: 0.9993
 # testing params
 n_sample: 30
 w: 0.3
-save_dir: './2000_conditional_EDMlarge'
+save_dir: './1200_conditional_EDMlarge'
 save_model: True

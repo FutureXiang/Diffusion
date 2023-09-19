@@ -1,8 +1,6 @@
 import argparse
 import os
-import random
 
-import numpy as np
 import torch
 import torch.distributed as dist
 import yaml
@@ -10,7 +8,7 @@ from torchvision.utils import make_grid, save_image
 from ema_pytorch import EMA
 
 from model.models import get_models_class
-from utils import Config, init_seeds, gather_tensor
+from utils import Config, init_seeds, gather_tensor, print0
 
 
 def get_default_steps(model_type, steps):
@@ -23,7 +21,7 @@ def get_default_steps(model_type, steps):
 # ===== sampling =====
 
 def sample(opt):
-    print(opt)
+    print0(opt)
     yaml_path = opt.config
     local_rank = opt.local_rank
     use_amp = opt.use_amp
@@ -31,12 +29,11 @@ def sample(opt):
     steps = opt.steps
     eta = opt.eta
     batches = opt.batches
-    use_ema = opt.ema
     ep = opt.epoch
 
     with open(yaml_path, 'r') as f:
         opt = yaml.full_load(f)
-    print(opt)
+    print0(opt)
     opt = Config(opt)
     if ep == -1:
         ep = opt.n_epoch - 1
@@ -51,31 +48,22 @@ def sample(opt):
     diff.to(device)
 
     target = os.path.join(opt.save_dir, "ckpts", f"model_{ep}.pth")
-    print("loading model at", target)
+    print0("loading model at", target)
     checkpoint = torch.load(target, map_location=device)
-    if use_ema:
-        ema = EMA(diff, beta=0.9999, update_after_step=1000, update_every=10)
-        ema.to(device)
-        ema.load_state_dict(checkpoint['EMA'])
-        model = ema.ema_model
-        prefix = "EMA"
-    else:
-        diff = torch.nn.SyncBatchNorm.convert_sync_batchnorm(diff)
-        diff = torch.nn.parallel.DistributedDataParallel(
-            diff, device_ids=[local_rank], output_device=local_rank)
-        diff.load_state_dict(checkpoint['MODEL'])
-        model = diff.module
-        prefix = ""
+    ema = EMA(diff, beta=opt.ema, update_after_step=0, update_every=1)
+    ema.to(device)
+    ema.load_state_dict(checkpoint['EMA'])
+    model = ema.ema_model
     model.eval()
 
     if local_rank == 0:
         if opt.model_type == 'EDM':
-            gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_edm_steps{steps}_eta{eta}")
+            gen_dir = os.path.join(opt.save_dir, f"EMAgenerated_ep{ep}_edm_steps{steps}_eta{eta}")
         else:
             if mode == 'DDPM':
-                gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_ddpm")
+                gen_dir = os.path.join(opt.save_dir, f"EMAgenerated_ep{ep}_ddpm")
             else:
-                gen_dir = os.path.join(opt.save_dir, f"{prefix}generated_ep{ep}_ddim_steps{steps}_eta{eta}")
+                gen_dir = os.path.join(opt.save_dir, f"EMAgenerated_ep{ep}_ddim_steps{steps}_eta{eta}")
         os.makedirs(gen_dir)
         gen_dir_png = os.path.join(gen_dir, "pngs")
         os.makedirs(gen_dir_png)
@@ -87,17 +75,17 @@ def sample(opt):
             samples_per_process = 400 // dist.get_world_size()
             args = dict(n_sample=samples_per_process, size=opt.network['image_shape'], notqdm=(local_rank != 0), use_amp=use_amp)
             if opt.model_type == 'EDM':
-                x_gen = model.edm_sample(**args, num_steps=steps, eta=eta)
+                x_gen = model.edm_sample(**args, steps=steps, eta=eta)
             else:
                 if mode == 'DDPM':
                     x_gen = model.sample(**args)
                 else:
                     x_gen = model.ddim_sample(**args, steps=steps, eta=eta)
         dist.barrier()
-        x_gen = gather_tensor(x_gen)
+        x_gen = gather_tensor(x_gen).cpu()
         if local_rank == 0:
             res.append(x_gen)
-            grid = make_grid(x_gen.cpu(), nrow=20)
+            grid = make_grid(x_gen, nrow=20)
             png_path = os.path.join(gen_dir, f"grid_{batch}.png")
             save_image(grid, png_path)
 
@@ -118,7 +106,6 @@ if __name__ == "__main__":
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--eta", type=float, default=0.0)
     parser.add_argument("--batches", type=int, default=125)
-    parser.add_argument("--ema", action='store_true', default=False)
     parser.add_argument("--epoch", type=int, default=-1)
     opt = parser.parse_args()
 

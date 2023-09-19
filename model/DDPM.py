@@ -1,10 +1,20 @@
-import numpy as np
+from functools import partial
+import math
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 from torch.cuda.amp import autocast as autocast
-import math
-from functools import partial
+
+
+def normalize_to_neg_one_to_one(img):
+    # [0.0, 1.0] -> [-1.0, 1.0]
+    return img * 2 - 1
+
+
+def unnormalize_to_zero_to_one(t):
+    # [-1.0, 1.0] -> [0.0, 1.0]
+    return (t + 1) * 0.5
+
 
 def linear_beta_schedule(timesteps, beta1, beta2):
     assert 0.0 < beta1 < beta2 < 1.0, "beta1 and beta2 must be in (0, 1)"
@@ -57,107 +67,101 @@ def schedules(betas, T, device, type='DDPM'):
     }
     return {key: dic[key].to(device) for key in dic}
 
-# ===== Normalization (helper functions)
-
-def normalize_to_neg_one_to_one(img):
-    # [0.0, 1.0] -> [-1.0, 1.0]
-    return img * 2 - 1
-
-
-def unnormalize_to_zero_to_one(t):
-    # [-1.0, 1.0] -> [0.0, 1.0]
-    return (t + 1) * 0.5
-
 
 class DDPM(nn.Module):
-    def __init__(self, nn_model, betas, n_T, device, pred_target='eps'):
+    def __init__(self, nn_model, betas, n_T, device):
+        ''' DDPM proposed by "Denoising Diffusion Probabilistic Models", and \
+            DDIM sampler proposed by "Denoising Diffusion Implicit Models".
+
+            Args:
+                nn_model: A network (e.g. UNet) which performs same-shape mapping.
+                device: The CUDA device that tensors run on.
+            Parameters:
+                betas, n_T
+        '''
         super(DDPM, self).__init__()
         self.nn_model = nn_model.to(device)
         params = sum(p.numel() for p in nn_model.parameters() if p.requires_grad) / 1e6
         print(f"nn model # params: {params:.1f}")
 
+        self.device = device
         self.ddpm_sche = schedules(betas, n_T, device, 'DDPM')
         self.ddim_sche = schedules(betas, n_T, device, 'DDIM')
         self.n_T = n_T
-        self.device = device
-        assert pred_target in ['eps', 'x0']
-        self.pred_target = pred_target
         self.loss = nn.MSELoss()
 
+    def perturb(self, x, t=None):
+        ''' Add noise to a clean image (diffusion process).
+
+            Args:
+                x: The normalized image tensor.
+                t: The specified timestep ranged in `[1, n_T]`. Type: int / torch.LongTensor / None. \
+                    Random `t ~ U[1, n_T]` is taken if t is None.
+            Returns:
+                The perturbed image, the corresponding timestep, and the noise.
+        '''
+        if t is None:
+            t = torch.randint(1, self.n_T + 1, (x.shape[0], )).to(self.device)
+        elif not isinstance(t, torch.Tensor):
+            t = torch.tensor([t]).to(self.device).repeat(x.shape[0])
+
+        noise = torch.randn_like(x)
+        sche = self.ddpm_sche
+        x_noised = (sche["sqrtab"][t, None, None, None] * x +
+                    sche["sqrtmab"][t, None, None, None] * noise)
+        return x_noised, t, noise
+
     def forward(self, x, use_amp=False):
+        ''' Training with simple noise prediction loss.
+
+            Args:
+                x: The clean image tensor ranged in `[0, 1]`.
+            Returns:
+                The simple MSE loss.
+        '''
         x = normalize_to_neg_one_to_one(x)
+        x_noised, t, noise = self.perturb(x, t=None)
 
-        # t ~ Uniform([1, n_T])
-        _ts = torch.randint(1, self.n_T + 1, (x.shape[0], )).to(self.device)
-        noise = torch.randn_like(x)
-
-        sche = self.ddpm_sche
-        x_t = (sche["sqrtab"][_ts, None, None, None] * x +
-               sche["sqrtmab"][_ts, None, None, None] * noise)
-
-        if self.pred_target == 'x0':
-            SNR = (sche["sqrtab"][_ts, None, None, None] ** 2) / \
-                  (sche["sqrtmab"][_ts, None, None, None] ** 2)
-            SNR.clamp_(max = 5)
-            with autocast(enabled=use_amp):
-                loss_4shape = SNR * (x - self.nn_model(x_t, _ts / self.n_T)) ** 2
-            return loss_4shape.mean()
-        else:
-            with autocast(enabled=use_amp):
-                return self.loss(noise, self.nn_model(x_t, _ts / self.n_T))
-
-    def get_feature(self, x, t, norm, use_amp=False):
-        x = normalize_to_neg_one_to_one(x)
-
-        _ts = torch.tensor([t]).to(self.device).repeat(x.shape[0])
-        noise = torch.randn_like(x)
-
-        sche = self.ddpm_sche
-        x_t = (sche["sqrtab"][_ts, None, None, None] * x +
-               sche["sqrtmab"][_ts, None, None, None] * noise)
-
-        ret = {}
         with autocast(enabled=use_amp):
-            feats = self.nn_model.get_activation(x_t, _ts / self.n_T)
-        for blockname in feats:
-            feat = feats[blockname].float()
-            if len(feat.shape) == 4:
-                # unet (B, C, H, W)
-                feat = feat.view(feat.shape[0], feat.shape[1], -1)
-                feat = torch.mean(feat, dim=2)
-            elif len(feat.shape) == 3:
-                # vit (B, L, D)
-                feat = feat[:, self.nn_model.extras:, :] # optional
-                feat = torch.mean(feat, dim=1)
-            else:
-                raise NotImplementedError
-            if norm:
-                feat = torch.nn.functional.normalize(feat)
-            ret[blockname] = feat
-        return ret
+            return self.loss(noise, self.nn_model(x_noised, t / self.n_T))
 
     def sample(self, n_sample, size, notqdm=False, use_amp=False):
+        ''' Sampling with DDPM sampler. Actual NFE is `n_T`.
+
+            Args:
+                n_sample: The batch size.
+                size: The image shape (e.g. `(3, 32, 32)`).
+            Returns:
+                The sampled image tensor ranged in `[0, 1]`.
+        '''
         sche = self.ddpm_sche
         x_i = torch.randn(n_sample, *size).to(self.device)
+
         for i in tqdm(range(self.n_T, 0, -1), disable=notqdm):
-            t_is = torch.tensor([i / self.n_T]).to(self.device)
-            t_is = t_is.repeat(n_sample)
+            t_is = torch.tensor([i / self.n_T]).to(self.device).repeat(n_sample)
 
             z = torch.randn(n_sample, *size).to(self.device) if i > 1 else 0
 
             alpha = sche["alphabar_t"][i]
             eps, _ = self.pred_eps_(x_i, t_is, alpha, use_amp)
 
-            # DDPM sampling, `T` steps
-            x_i = sche["oneover_sqrta"][i] * \
-                    (x_i - sche["ma_over_sqrtmab"][i] * eps) + \
-                  sche["sqrt_beta_t"][i] * z
-                     # LET variance sigma_t = sqrt_beta_t
+            mean = sche["oneover_sqrta"][i] * (x_i - sche["ma_over_sqrtmab"][i] * eps)
+            variance = sche["sqrt_beta_t"][i] # LET variance sigma_t = sqrt_beta_t
+            x_i = mean + variance * z
 
-        x_i = unnormalize_to_zero_to_one(x_i)
-        return x_i
+        return unnormalize_to_zero_to_one(x_i)
 
     def ddim_sample(self, n_sample, size, steps=100, eta=0.0, notqdm=False, use_amp=False):
+        ''' Sampling with DDIM sampler. Actual NFE is `steps`.
+
+            Args:
+                n_sample: The batch size.
+                size: The image shape (e.g. `(3, 32, 32)`).
+                steps: The number of total timesteps.
+                eta: controls stochasticity. Set `eta=0` for deterministic sampling.
+            Returns:
+                The sampled image tensor ranged in `[0, 1]`.
+        '''
         sche = self.ddim_sche
         x_i = torch.randn(n_sample, *size).to(self.device)
 
@@ -167,12 +171,10 @@ class DDPM(nn.Module):
         # e.g. [(801, 601), (601, 401), (401, 201), (201, 1), (1, 0)]
 
         for time, time_next in tqdm(time_pairs, disable=notqdm):
-            t_is = torch.tensor([time / self.n_T]).to(self.device)
-            t_is = t_is.repeat(n_sample)
+            t_is = torch.tensor([time / self.n_T]).to(self.device).repeat(n_sample)
 
             z = torch.randn(n_sample, *size).to(self.device) if time_next > 0 else 0
 
-            # DDIM sampling, `steps` steps
             alpha = sche["alphabar_t"][time]
             eps, x0_t = self.pred_eps_(x_i, t_is, alpha, use_amp)
             alpha_next = sche["alphabar_t"][time_next]
@@ -180,8 +182,7 @@ class DDPM(nn.Module):
             c2 = (1 - alpha_next - c1 ** 2).sqrt()
             x_i = alpha_next.sqrt() * x0_t + c2 * eps + c1 * z
 
-        x_i = unnormalize_to_zero_to_one(x_i)
-        return x_i
+        return unnormalize_to_zero_to_one(x_i)
 
     def pred_eps_(self, x, t, alpha, use_amp, clip_x=True):
         def pred_eps_from_x0(x0):
@@ -191,17 +192,12 @@ class DDPM(nn.Module):
             return (x - (1 - alpha).sqrt() * eps) / alpha.sqrt()
 
         # get prediction of x0
-        if self.pred_target == 'x0':
-            with autocast(enabled=use_amp):
-                x0_t = self.nn_model(x, t).float()
-        else:
-            with autocast(enabled=use_amp):
-                eps = self.nn_model(x, t).float()
-            x0_t = pred_x0_from_eps(eps)
+        with autocast(enabled=use_amp):
+            eps = self.nn_model(x, t).float()
+        denoised = pred_x0_from_eps(eps)
+
         # pixel-space clipping (optional)
         if clip_x:
-            x0_t = torch.clip(x0_t, -1., 1.)
-        # get prediction or update of eps
-        if clip_x or self.pred_target == 'x0':
-            eps = pred_eps_from_x0(x0_t)
-        return eps, x0_t
+            denoised = torch.clip(denoised, -1., 1.)
+            eps = pred_eps_from_x0(denoised)
+        return eps, denoised

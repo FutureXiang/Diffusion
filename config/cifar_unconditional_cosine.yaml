@@ -14,7 +14,7 @@ network:
   use_res_for_updown: False
 
 # training params
-n_epoch: 1000
+n_epoch: 700
 batch_size: 128
 lrate: 1.0e-4
 warm_epoch: 13
@@ -24,13 +24,5 @@ ema: 0.9999
 
 # testing params
 n_sample: 30
-save_dir: './1000_unconditional_cosine'
+save_dir: './700_unconditional_cosine'
 save_model: True
-
-# linear probe
-linear:
-  n_epoch: 15
-  batch_size: 128
-  lrate: 1.0e-3
-  timestep: 21
-  blockname: 'out_6'

@@ -11,7 +11,7 @@ from tqdm import tqdm
 from ema_pytorch import EMA
 
 from model.models import get_models_class
-from utils import Config, get_optimizer, init_seeds, reduce_tensor, DataLoaderDDP
+from utils import Config, get_optimizer, init_seeds, reduce_tensor, DataLoaderDDP, print0
 
 
 # ===== training =====
@@ -23,7 +23,7 @@ def train(opt):
 
     with open(yaml_path, 'r') as f:
         opt = yaml.full_load(f)
-    print(opt)
+    print0(opt)
     opt = Config(opt)
     model_dir = os.path.join(opt.save_dir, "ckpts")
     vis_dir = os.path.join(opt.save_dir, "visual")
@@ -50,8 +50,8 @@ def train(opt):
     if opt.flip:
         tf = [transforms.RandomHorizontalFlip()] + tf
     tf = transforms.Compose(tf)
-    train_set = CIFAR10("./data", train=True, download=False, transform=tf)
-    print("CIFAR10 train dataset:", len(train_set))
+    train_set = CIFAR10("./data", train=True, transform=tf)
+    print0("CIFAR10 train dataset:", len(train_set))
 
     train_loader, sampler = DataLoaderDDP(train_set,
                                           batch_size=opt.batch_size,
@@ -59,14 +59,14 @@ def train(opt):
 
     lr = opt.lrate
     DDP_multiplier = dist.get_world_size()
-    print("Using DDP, lr = %f * %d" % (lr, DDP_multiplier))
+    print0("Using DDP, lr = %f * %d" % (lr, DDP_multiplier))
     lr *= DDP_multiplier
     optim = get_optimizer(diff.parameters(), opt, lr=lr)
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     if opt.load_epoch != -1:
         target = os.path.join(model_dir, f"model_{opt.load_epoch}.pth")
-        print("loading model at", target)
+        print0("loading model at", target)
         checkpoint = torch.load(target, map_location=device)
         diff.load_state_dict(checkpoint['MODEL'])
         if local_rank == 0:
@@ -110,29 +110,15 @@ def train(opt):
 
         # testing
         if local_rank == 0:
-            if ep % 50 == 0 or ep == opt.n_epoch - 1:
+            if ep % 100 == 0 or ep == opt.n_epoch - 1:
                 pass
             else:
                 continue
 
             if opt.model_type == 'DDPM':
-                raw_sample_method = diff.module.ddim_sample
                 ema_sample_method = ema.ema_model.ddim_sample
             elif opt.model_type == 'EDM':
-                raw_sample_method = diff.module.edm_sample
                 ema_sample_method = ema.ema_model.edm_sample
-            diff.eval()
-            with torch.no_grad():
-                x_gen = raw_sample_method(opt.n_sample, x.shape[1:])
-            # save an image of currently generated samples (top rows)
-            # followed by real images (bottom rows)
-            x_real = x[:opt.n_sample]
-            x_all = torch.cat([x_gen.cpu(), x_real.cpu()])
-            grid = make_grid(x_all, nrow=10)
-
-            save_path = os.path.join(vis_dir, f"image_ep{ep}.png")
-            save_image(grid, save_path)
-            print('saved image at', save_path)
 
             ema.ema_model.eval()
             with torch.no_grad():
